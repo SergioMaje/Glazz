@@ -1,0 +1,332 @@
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Download, FileSpreadsheet, TrendingUp } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
+import { supabase } from '@/lib/supabase'
+import { formatCOP, formatFecha } from '@/lib/utils'
+
+type ItemValorizado = {
+  id: string
+  nombre: string
+  codigo: string
+  stock_actual: number
+  precio_costo: number
+  valor_total: number
+  categoria: string
+  unidad: string
+}
+
+type CotizacionReporte = {
+  id: string
+  numero: string
+  created_at: string
+  estado: string
+  total: number
+  cliente: string
+  items_count: number
+}
+
+const ESTADO_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'success' | 'warning' | 'outline'> = {
+  borrador: 'secondary',
+  enviada: 'default',
+  aprobada: 'success',
+  rechazada: 'destructive',
+  cancelada: 'outline',
+}
+
+function exportarCSV(filas: string[][], nombreArchivo: string) {
+  const contenido = filas.map((fila) => fila.map((celda) => `"${String(celda).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob(['﻿' + contenido], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombreArchivo
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export function ReportesPage() {
+  const hoy = new Date().toISOString().split('T')[0]
+  const hace30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+  const [desde, setDesde] = useState(hace30)
+  const [hasta, setHasta] = useState(hoy)
+
+  const { data: inventario, isLoading: loadingInv } = useQuery({
+    queryKey: ['reporte_inventario'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('items_inventario')
+        .select('id, nombre, codigo, stock_actual, precio_costo, categoria:categorias(nombre), unidad_medida:unidades_medida(simbolo)')
+        .eq('activo', true)
+        .order('nombre')
+      if (error) throw error
+
+      return (data ?? []).map((item) => ({
+        id: item.id,
+        nombre: item.nombre,
+        codigo: item.codigo,
+        stock_actual: item.stock_actual,
+        precio_costo: item.precio_costo,
+        valor_total: item.stock_actual * item.precio_costo,
+        categoria: (item.categoria as unknown as { nombre: string } | null)?.nombre ?? '—',
+        unidad: (item.unidad_medida as unknown as { simbolo: string } | null)?.simbolo ?? '—',
+      })) as ItemValorizado[]
+    },
+  })
+
+  const { data: ventas, isLoading: loadingVentas } = useQuery({
+    queryKey: ['reporte_ventas', desde, hasta],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('cotizaciones')
+        .select('id, numero, created_at, estado, total, cliente:clientes(nombre, apellido), cotizacion_items(id)')
+        .gte('created_at', desde)
+        .lte('created_at', hasta + 'T23:59:59')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+
+      return (data ?? []).map((c) => {
+        const cliente = c.cliente as unknown as { nombre: string; apellido: string } | null
+        const items = c.cotizacion_items as { id: string }[] | null
+        return {
+          id: c.id,
+          numero: c.numero,
+          created_at: c.created_at,
+          estado: c.estado,
+          total: c.total ?? 0,
+          cliente: cliente ? `${cliente.nombre} ${cliente.apellido}` : '—',
+          items_count: items?.length ?? 0,
+        } as CotizacionReporte
+      })
+    },
+    enabled: !!desde && !!hasta,
+  })
+
+  const totalInventario = inventario?.reduce((acc, item) => acc + item.valor_total, 0) ?? 0
+  const totalVentas = ventas?.reduce((acc, cot) => acc + cot.total, 0) ?? 0
+  const totalAprobadas = ventas?.filter((c) => c.estado === 'aprobada').reduce((acc, c) => acc + c.total, 0) ?? 0
+
+  const exportarInventario = () => {
+    if (!inventario) return
+    const encabezado = ['Código', 'Nombre', 'Categoría', 'Unidad', 'Stock', 'Costo unitario', 'Valor total']
+    const filas = inventario.map((item) => [
+      item.codigo,
+      item.nombre,
+      item.categoria,
+      item.unidad,
+      String(item.stock_actual),
+      String(item.precio_costo),
+      String(item.valor_total),
+    ])
+    exportarCSV([encabezado, ...filas], `inventario_valorizado_${hoy}.csv`)
+  }
+
+  const exportarVentas = () => {
+    if (!ventas) return
+    const encabezado = ['N° Cotización', 'Fecha', 'Cliente', 'Estado', 'Items', 'Total COP']
+    const filas = ventas.map((c) => [
+      c.numero,
+      formatFecha(c.created_at),
+      c.cliente,
+      c.estado,
+      String(c.items_count),
+      String(c.total),
+    ])
+    exportarCSV([encabezado, ...filas], `ventas_${desde}_${hasta}.csv`)
+  }
+
+  return (
+    <div className="space-y-4">
+      <Tabs defaultValue="inventario">
+        <TabsList>
+          <TabsTrigger value="inventario">Inventario valorizado</TabsTrigger>
+          <TabsTrigger value="ventas">Ventas por período</TabsTrigger>
+        </TabsList>
+
+        {/* ── Tab Inventario ────────────────────────────────────── */}
+        <TabsContent value="inventario" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">
+                Valor total en stock:{' '}
+                <span className="font-semibold text-foreground">{formatCOP(totalInventario)}</span>
+              </p>
+            </div>
+            <Button variant="outline" onClick={exportarInventario} disabled={!inventario}>
+              <Download className="mr-2 h-4 w-4" />
+              Exportar CSV
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              {loadingInv ? (
+                <LoadingSpinner className="py-12" />
+              ) : !inventario || inventario.length === 0 ? (
+                <p className="py-12 text-center text-sm text-muted-foreground">No hay items en inventario</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-xs font-medium uppercase text-muted-foreground">
+                        <th className="px-4 py-3 text-left">Código</th>
+                        <th className="px-4 py-3 text-left">Nombre</th>
+                        <th className="px-4 py-3 text-left">Categoría</th>
+                        <th className="px-4 py-3 text-right">Stock</th>
+                        <th className="px-4 py-3 text-right">Costo unit.</th>
+                        <th className="px-4 py-3 text-right">Valor total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventario.map((item) => (
+                        <tr key={item.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{item.codigo}</td>
+                          <td className="px-4 py-3 font-medium">{item.nombre}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{item.categoria}</td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {item.stock_actual} {item.unidad}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono">{formatCOP(item.precio_costo)}</td>
+                          <td className="px-4 py-3 text-right font-semibold">{formatCOP(item.valor_total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-muted/50">
+                        <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">
+                          Total valorizado
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold">{formatCOP(totalInventario)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tab Ventas ────────────────────────────────────────── */}
+        <TabsContent value="ventas" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Filtrar por período</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Desde</Label>
+                  <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-40" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Hasta</Label>
+                  <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-40" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {ventas && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Card>
+                <CardContent className="flex items-center gap-4 p-5">
+                  <FileSpreadsheet className="h-8 w-8 text-muted-foreground" />
+                  <div>
+                    <p className="text-2xl font-bold">{ventas.length}</p>
+                    <p className="text-xs text-muted-foreground">Cotizaciones en el período</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="flex items-center gap-4 p-5">
+                  <TrendingUp className="h-8 w-8 text-green-600" />
+                  <div>
+                    <p className="text-2xl font-bold">{formatCOP(totalAprobadas)}</p>
+                    <p className="text-xs text-muted-foreground">Ventas aprobadas</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="flex items-center gap-4 p-5">
+                  <FileSpreadsheet className="h-8 w-8 text-blue-600" />
+                  <div>
+                    <p className="text-2xl font-bold">{formatCOP(totalVentas)}</p>
+                    <p className="text-xs text-muted-foreground">Total facturado (todas)</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {ventas ? `${ventas.length} cotizaciones encontradas` : ''}
+            </p>
+            <Button variant="outline" onClick={exportarVentas} disabled={!ventas || ventas.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              Exportar CSV
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              {loadingVentas ? (
+                <LoadingSpinner className="py-12" />
+              ) : !ventas || ventas.length === 0 ? (
+                <p className="py-12 text-center text-sm text-muted-foreground">
+                  No hay cotizaciones en el período seleccionado
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-xs font-medium uppercase text-muted-foreground">
+                        <th className="px-4 py-3 text-left">N° Cotización</th>
+                        <th className="px-4 py-3 text-left">Fecha</th>
+                        <th className="px-4 py-3 text-left">Cliente</th>
+                        <th className="px-4 py-3 text-center">Estado</th>
+                        <th className="px-4 py-3 text-right">Items</th>
+                        <th className="px-4 py-3 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ventas.map((cot) => (
+                        <tr key={cot.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-3 font-mono text-xs font-medium">{cot.numero}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{formatFecha(cot.created_at)}</td>
+                          <td className="px-4 py-3">{cot.cliente}</td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge variant={ESTADO_VARIANTS[cot.estado] ?? 'secondary'} className="capitalize">
+                              {cot.estado}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono">{cot.items_count}</td>
+                          <td className="px-4 py-3 text-right font-semibold">{formatCOP(cot.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-muted/50">
+                        <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">
+                          Total aprobadas
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold">{formatCOP(totalAprobadas)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
