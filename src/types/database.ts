@@ -166,3 +166,38 @@ export interface OrdenTrabajo {
   updated_at: string
   cliente?: Cliente
 }
+
+export type FormulaCorte =
+  | 'ancho'
+  | 'alto'
+  | 'ancho_menos_margen'
+  | 'alto_menos_margen'
+  | 'mitad_ancho'
+  | 'mitad_alto'
+  | 'fijo'
+
+export interface ReferenciaCorte {
+  id: string
+  referencia_id: string
+  nombre_pieza: string
+  formula: FormulaCorte
+  margen_cm: number
+  cantidad_fija_cm: number | null
+  cantidad_piezas: number
+  orden: number
+  created_at: string
+}
+
+export interface ReferenciaProducto {
+  id: string
+  nombre: string
+  descripcion: string | null
+  tipo_producto_id: string
+  plantilla_id: string
+  activa: boolean
+  created_at: string
+  updated_at: string
+  tipo_producto?: TipoProducto
+  plantilla?: PlantillaProducto
+  cortes?: ReferenciaCorte[]
+}

@@ -1,6 +1,5 @@
-import { useState, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Calculator, ShoppingCart, Printer } from 'lucide-react'
+import { useState, useMemo, useRef, useCallback } from 'react'
+import { Calculator, ShoppingCart, Printer, Scissors, AlertCircle, ImagePlus, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { PreviewProducto } from './PreviewProducto'
 import { usePlantillas } from '@/hooks/useProductos'
-import { formatCOP } from '@/lib/utils'
+import { useReferencias } from '@/hooks/useReferencias'
+import type { ItemCotizacion } from './PanelCotizacion'
 
 type TipoProducto = 'ventana' | 'puerta' | 'division' | 'espejo'
 
@@ -31,26 +31,59 @@ const COLORES_PERFIL = [
 
 const MARGEN_VENTA = 1.35
 
-const FMT = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 })
 
-export function ConfiguradorProducto() {
-  const navigate = useNavigate()
+interface ConfiguradorProductoProps {
+  onAgregarItem: (item: ItemCotizacion) => void
+}
+
+export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProps) {
   const [tipoActivo, setTipoActivo] = useState<TipoProducto>('ventana')
   const [anchoCm, setAnchoCm] = useState(120)
   const [altoCm, setAltoCm] = useState(150)
   const [colorPerfil, setColorPerfil] = useState('#9CA3AF')
   const [plantillaId, setPlantillaId] = useState<string>('')
+  const [referenciaId, setReferenciaId] = useState<string>('')
   const [especificaciones, setEspecificaciones] = useState('')
+
+  const [imagenFicha, setImagenFicha] = useState<string | null>(null)
+  const imagenInputRef = useRef<HTMLInputElement>(null)
 
   const previewRef = useRef<HTMLDivElement>(null)
 
   const { data: plantillas } = usePlantillas()
+  const { data: referencias } = useReferencias()
 
   const plantillasFiltradas = plantillas?.filter((p) =>
     p.tipo_producto?.nombre === tipoActivo
   ) ?? []
 
   const plantillaSeleccionada = plantillas?.find((p) => p.id === plantillaId) ?? null
+
+  const referenciasFiltradas = referencias?.filter((r) =>
+    r.tipo_producto?.nombre === tipoActivo
+  ) ?? []
+
+  const referenciaSeleccionada = referencias?.find((r) => r.id === referenciaId) ?? null
+
+  const handleImagenChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setImagenFicha(ev.target?.result as string)
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }, [])
+
+  const handleSeleccionarReferencia = (refId: string) => {
+    setReferenciaId(refId)
+    const ref = referencias?.find((r) => r.id === refId)
+    if (ref) setPlantillaId(ref.plantilla_id)
+  }
+
+  const handleSeleccionarPlantilla = (pid: string) => {
+    setPlantillaId(pid)
+    setReferenciaId('')
+  }
 
   const materiales = useMemo(() => {
     if (!plantillaSeleccionada?.componentes) return []
@@ -77,19 +110,45 @@ export function ConfiguradorProducto() {
     })
   }, [plantillaSeleccionada, anchoCm, altoCm])
 
+  const cortesCalculados = useMemo(() => {
+    if (!referenciaSeleccionada?.cortes?.length) return []
+    return referenciaSeleccionada.cortes.map((c) => {
+      let valor = 0
+      switch (c.formula) {
+        case 'ancho':              valor = anchoCm; break
+        case 'alto':               valor = altoCm; break
+        case 'ancho_menos_margen': valor = anchoCm - c.margen_cm; break
+        case 'alto_menos_margen':  valor = altoCm - c.margen_cm; break
+        case 'mitad_ancho':        valor = anchoCm / 2; break
+        case 'mitad_alto':         valor = altoCm / 2; break
+        case 'fijo':               valor = c.cantidad_fija_cm ?? 0; break
+      }
+      return { ...c, valor_cm: Math.max(0, valor) }
+    })
+  }, [referenciaSeleccionada, anchoCm, altoCm])
+
   const costoTotal = materiales.reduce((s, m) => s + m.costo_total, 0)
   const precioSugerido = costoTotal * MARGEN_VENTA
 
-  const irACotizacion = () => {
-    const params = new URLSearchParams({
-      tipo: tipoActivo,
-      ancho: anchoCm.toString(),
-      alto: altoCm.toString(),
-      plantilla: plantillaId,
-      costo: costoTotal.toString(),
-      precio: precioSugerido.toString(),
+  const agregarACotizacion = () => {
+    const tipoLabel = TIPOS.find((t) => t.key === tipoActivo)?.label ?? tipoActivo
+    const colorLabel = COLORES_PERFIL.find((c) => c.value === colorPerfil)?.label ?? colorPerfil
+    const referenciaNombre = referenciaSeleccionada?.nombre ?? ''
+    const descripcion = `${tipoLabel} ${anchoCm}×${altoCm}cm — ${colorLabel} — ${referenciaNombre}`
+    const precioRedondeado = Math.round(precioSugerido)
+
+    onAgregarItem({
+      plantilla_id: plantillaId || null,
+      descripcion,
+      ancho_cm: anchoCm,
+      alto_cm: altoCm,
+      area_m2: (anchoCm / 100) * (altoCm / 100),
+      cantidad: 1,
+      precio_unitario: precioRedondeado,
+      precio_total: precioRedondeado,
+      notas: especificaciones.trim() || null,
     })
-    navigate(`/cotizaciones/nueva?${params.toString()}`)
+    setEspecificaciones('')
   }
 
   const imprimir = () => {
@@ -97,6 +156,7 @@ export function ConfiguradorProducto() {
     const svgHtml = svgEl ? new XMLSerializer().serializeToString(svgEl) : ''
     const tipoLabel = TIPOS.find((t) => t.key === tipoActivo)?.label ?? tipoActivo
     const plantillaNombre = plantillaSeleccionada?.nombre ?? '—'
+    const referenciaNombre = referenciaSeleccionada?.nombre ?? null
     const areaM2 = ((anchoCm / 100) * (altoCm / 100)).toFixed(2)
     const perimetroMl = (2 * (anchoCm / 100 + altoCm / 100)).toFixed(2)
     const fecha = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -111,7 +171,6 @@ export function ConfiguradorProducto() {
               <th>Cantidad</th>
               <th>Unidad</th>
               <th>Stock</th>
-              <th class="right">Costo</th>
             </tr>
           </thead>
           <tbody>
@@ -121,22 +180,40 @@ export function ConfiguradorProducto() {
                 <td>${m.cantidad_calculada.toFixed(2)}</td>
                 <td>${m.item?.unidad_medida?.simbolo ?? '—'}</td>
                 <td><span class="badge ${m.stock_ok ? 'ok' : 'no'}">${m.stock_ok ? 'Disponible' : 'Sin stock'}</span></td>
-                <td class="right">${FMT.format(m.costo_total)}</td>
               </tr>
             `).join('')}
           </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="4"><strong>Total materiales</strong></td>
-              <td class="right"><strong>${FMT.format(costoTotal)}</strong></td>
-            </tr>
-          </tfoot>
         </table>
-        <div class="cost-box">
-          <div class="cost-row"><span>Costo de materiales</span><span>${FMT.format(costoTotal)}</span></div>
-          <div class="cost-row accent"><span>Precio sugerido (×${MARGEN_VENTA})</span><span>${FMT.format(precioSugerido)}</span></div>
-        </div>
       </div>`
+
+    const cortesHtml = cortesCalculados.length === 0 ? '' : `
+      <div class="section">
+        <h2>Medidas de corte</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Pieza</th>
+              <th>Cantidad</th>
+              <th class="right">Longitud (cm)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${cortesCalculados.map((c) => `
+              <tr>
+                <td>${c.nombre_pieza}</td>
+                <td>${c.cantidad_piezas} ${c.cantidad_piezas === 1 ? 'pieza' : 'piezas'}</td>
+                <td class="right"><strong>${c.valor_cm.toFixed(1)} cm</strong></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`
+
+    const imagenHtml = imagenFicha ? `
+      <div class="section">
+        <h2>Imagen de referencia</h2>
+        <div class="img-wrap"><img src="${imagenFicha}" alt="Imagen de referencia" /></div>
+      </div>` : ''
 
     const specsHtml = especificaciones.trim() ? `
       <div class="section">
@@ -172,6 +249,7 @@ export function ConfiguradorProducto() {
     .cost-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
     .cost-row.accent{font-weight:700;font-size:15px;color:#1d4ed8;border-top:1px solid #e5e7eb;margin-top:6px;padding-top:6px}
     .specs{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;line-height:1.6;color:#374151}
+    .img-wrap{text-align:center;padding:8px 0}.img-wrap img{max-width:100%;max-height:260px;object-fit:contain;border:1px solid #e5e7eb;border-radius:6px}
     @media print{body{padding:1cm}}
   </style>
 </head>
@@ -184,6 +262,7 @@ export function ConfiguradorProducto() {
     <div class="grid2">
       <div class="kv"><span>Tipo</span><strong>${tipoLabel}</strong></div>
       <div class="kv"><span>Plantilla</span><strong>${plantillaNombre}</strong></div>
+      ${referenciaNombre ? `<div class="kv"><span>Referencia</span><strong>${referenciaNombre}</strong></div>` : ''}
       <div class="kv"><span>Ancho</span><strong>${anchoCm} cm</strong></div>
       <div class="kv"><span>Alto</span><strong>${altoCm} cm</strong></div>
       <div class="kv"><span>Área</span><strong>${areaM2} m²</strong></div>
@@ -196,7 +275,9 @@ export function ConfiguradorProducto() {
     <div class="preview">${svgHtml}</div>
   </div>
 
+  ${imagenHtml}
   ${materialesHtml}
+  ${cortesHtml}
   ${specsHtml}
 </body>
 </html>`
@@ -217,7 +298,7 @@ export function ConfiguradorProducto() {
             <CardTitle>Tipo de producto</CardTitle>
           </CardHeader>
           <CardContent>
-            <Tabs value={tipoActivo} onValueChange={(v) => { setTipoActivo(v as TipoProducto); setPlantillaId('') }}>
+            <Tabs value={tipoActivo} onValueChange={(v) => { setTipoActivo(v as TipoProducto); setPlantillaId(''); setReferenciaId('') }}>
               <TabsList className="grid w-full grid-cols-4">
                 {TIPOS.map(({ key, label }) => (
                   <TabsTrigger key={key} value={key}>{label}</TabsTrigger>
@@ -278,8 +359,29 @@ export function ConfiguradorProducto() {
             </div>
 
             <div className="space-y-2">
+              <Label>Referencia <span className="text-destructive">*</span></Label>
+              {referenciasFiltradas.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  No hay referencias configuradas para este tipo de producto
+                </div>
+              ) : (
+                <Select value={referenciaId || undefined} onValueChange={handleSeleccionarReferencia}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona una referencia..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {referenciasFiltradas.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
               <Label>Plantilla de materiales</Label>
-              <Select value={plantillaId} onValueChange={setPlantillaId}>
+              <Select value={plantillaId} onValueChange={handleSeleccionarPlantilla}>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecciona una plantilla..." />
                 </SelectTrigger>
@@ -290,6 +392,61 @@ export function ConfiguradorProducto() {
                 </SelectContent>
               </Select>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Imagen de referencia</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <input
+              ref={imagenInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImagenChange}
+            />
+            {imagenFicha ? (
+              <div className="relative">
+                <img
+                  src={imagenFicha}
+                  alt="Imagen de referencia"
+                  className="max-h-48 w-full rounded-md border object-contain bg-muted/30"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  className="absolute right-2 top-2 h-6 w-6"
+                  onClick={() => setImagenFicha(null)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => imagenInputRef.current?.click()}
+                className="flex w-full flex-col items-center gap-2 rounded-md border-2 border-dashed border-input py-6 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                <ImagePlus className="h-8 w-8" />
+                <span>Haz clic para subir una imagen</span>
+                <span className="text-xs">PNG, JPG, WEBP — la imagen se incluirá en la ficha impresa</span>
+              </button>
+            )}
+            {imagenFicha && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => imagenInputRef.current?.click()}
+              >
+                <ImagePlus className="mr-2 h-4 w-4" />
+                Cambiar imagen
+              </Button>
+            )}
           </CardContent>
         </Card>
 
@@ -308,53 +465,6 @@ export function ConfiguradorProducto() {
           </CardContent>
         </Card>
 
-        {materiales.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calculator className="h-5 w-5" />
-                Materiales calculados
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {materiales.map((mat) => (
-                  <div key={mat.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                    <div className="flex-1">
-                      <p className="font-medium">{mat.item?.nombre}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {mat.cantidad_calculada.toFixed(2)} {mat.item?.unidad_medida?.simbolo}
-                        {mat.desperdicio_pct > 0 && ` (inc. ${mat.desperdicio_pct}% desperdicio)`}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono">{formatCOP(mat.costo_total)}</span>
-                      <Badge variant={mat.stock_ok ? 'success' : 'destructive'} className="text-xs">
-                        {mat.stock_ok ? 'OK' : 'Sin stock'}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-lg bg-muted/50 p-3">
-                <div className="flex justify-between text-sm">
-                  <span>Costo de materiales:</span>
-                  <span className="font-mono">{formatCOP(costoTotal)}</span>
-                </div>
-                <div className="mt-1 flex justify-between font-semibold">
-                  <span>Precio sugerido (×{MARGEN_VENTA}):</span>
-                  <span className="font-mono text-primary">{formatCOP(precioSugerido)}</span>
-                </div>
-              </div>
-
-              <Button className="mt-4 w-full" onClick={irACotizacion} disabled={!plantillaId}>
-                <ShoppingCart className="mr-2 h-4 w-4" />
-                Guardar como cotización
-              </Button>
-            </CardContent>
-          </Card>
-        )}
       </div>
 
       <div className="space-y-4">
@@ -392,6 +502,66 @@ export function ConfiguradorProducto() {
             </div>
           </CardContent>
         </Card>
+
+        {materiales.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calculator className="h-5 w-5" />
+                Materiales calculados
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {materiales.map((mat) => (
+                  <div key={mat.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                    <div className="flex-1">
+                      <p className="font-medium">{mat.item?.nombre}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {mat.cantidad_calculada.toFixed(2)} {mat.item?.unidad_medida?.simbolo}
+                        {mat.desperdicio_pct > 0 && ` (inc. ${mat.desperdicio_pct}% desperdicio)`}
+                      </p>
+                    </div>
+                    <Badge variant={mat.stock_ok ? 'success' : 'destructive'} className="text-xs">
+                      {mat.stock_ok ? 'OK' : 'Sin stock'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+
+              <Button className="mt-4 w-full" onClick={agregarACotizacion} disabled={!plantillaId || !referenciaId}>
+                <ShoppingCart className="mr-2 h-4 w-4" />
+                Agregar a cotización
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {cortesCalculados.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Scissors className="h-5 w-5" />
+                Medidas de corte
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {cortesCalculados.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                    <div className="flex-1">
+                      <p className="font-medium">{c.nombre_pieza}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {c.cantidad_piezas} {c.cantidad_piezas === 1 ? 'pieza' : 'piezas'}
+                      </p>
+                    </div>
+                    <span className="font-mono font-semibold">{c.valor_cm.toFixed(1)} cm</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )
