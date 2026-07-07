@@ -72,7 +72,7 @@ type PlantillaInput = {
   componentes: {
     item_id: string
     formula: 'area' | 'perimetro' | 'ancho' | 'alto' | 'fijo'
-    cantidad_fija?: number
+    cantidad_fija?: number | null
     desperdicio_pct: number
     obligatorio: boolean
   }[]

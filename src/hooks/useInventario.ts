@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import type { ItemInventario, MovimientoInventario } from '@/types/database'
+import type { ItemInventario, MovimientoInventario, Proveedor } from '@/types/database'
 
 export function useItems() {
   return useQuery({

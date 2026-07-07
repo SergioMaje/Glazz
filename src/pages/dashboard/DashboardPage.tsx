@@ -124,7 +124,7 @@ export function DashboardPage() {
 
       const map = new Map<string, { nombre: string; total: number; cotizaciones: number }>()
       for (const cot of data) {
-        const cliente = cot.cliente as { nombre: string; apellido: string } | null
+        const cliente = cot.cliente as unknown as { nombre: string; apellido: string } | null
         if (!cot.cliente_id || !cliente) continue
         const existing = map.get(cot.cliente_id)
         if (existing) {
