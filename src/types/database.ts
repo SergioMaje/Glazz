@@ -125,7 +125,7 @@ export interface Cotizacion {
   numero: string
   cliente_id: string
   usuario_id: string
-  estado: 'borrador' | 'enviada' | 'aprobada' | 'rechazada' | 'vencida'
+  estado: 'borrador' | 'enviada' | 'aprobada' | 'rechazada' | 'vencida' | 'vendida'
   fecha_emision: string
   fecha_vencimiento: string | null
   subtotal: number
@@ -200,4 +200,31 @@ export interface ReferenciaProducto {
   tipo_producto?: TipoProducto
   plantilla?: PlantillaProducto
   cortes?: ReferenciaCorte[]
+}
+
+export interface CashRegisterSession {
+  id: string
+  opened_at: string
+  closed_at: string | null
+  opened_by: string
+  closed_by: string | null
+  opening_amount: number
+  expected_amount: number | null
+  counted_amount: number | null
+  difference: number | null
+  status: 'open' | 'closed'
+  created_at: string
+  opened_by_usuario?: Usuario
+  closed_by_usuario?: Usuario
+}
+
+export interface Venta {
+  id: string
+  cotizacion_id: string
+  session_id: string
+  metodo_pago: 'efectivo' | 'tarjeta' | 'transferencia'
+  monto: number
+  usuario_id: string
+  created_at: string
+  cotizacion?: Cotizacion
 }

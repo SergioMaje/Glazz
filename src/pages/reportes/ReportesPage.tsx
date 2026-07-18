@@ -7,9 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { supabase } from '@/lib/supabase'
-import { formatCOP, formatFecha } from '@/lib/utils'
+import { formatCOP, formatFecha, formatFechaHora } from '@/lib/utils'
+import { useHistorialCaja } from '@/hooks/useCajaSesiones'
+import type { SesionCajaHistorial } from '@/hooks/useCajaSesiones'
+import { ResumenVentasSesion } from '@/pages/caja/CajaPage'
 
 type ItemValorizado = {
   id: string
@@ -57,6 +61,9 @@ export function ReportesPage() {
 
   const [desde, setDesde] = useState(hace30)
   const [hasta, setHasta] = useState(hoy)
+  const [sesionDetalle, setSesionDetalle] = useState<SesionCajaHistorial | null>(null)
+
+  const { data: historialCaja, isLoading: loadingCaja } = useHistorialCaja()
 
   const { data: inventario, isLoading: loadingInv } = useQuery({
     queryKey: ['reporte_inventario'],
@@ -148,6 +155,7 @@ export function ReportesPage() {
         <TabsList>
           <TabsTrigger value="inventario">Inventario valorizado</TabsTrigger>
           <TabsTrigger value="ventas">Ventas por período</TabsTrigger>
+          <TabsTrigger value="caja">Caja</TabsTrigger>
         </TabsList>
 
         {/* ── Tab Inventario ────────────────────────────────────── */}
@@ -326,7 +334,75 @@ export function ReportesPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ── Tab Caja ──────────────────────────────────────────── */}
+        <TabsContent value="caja" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Historial de cierres de caja</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loadingCaja ? (
+                <LoadingSpinner className="py-12" />
+              ) : !historialCaja || historialCaja.length === 0 ? (
+                <p className="py-12 text-center text-sm text-muted-foreground">Aún no hay cierres de caja registrados</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-left text-xs font-medium uppercase text-muted-foreground">
+                        <th className="px-4 py-3">Apertura</th>
+                        <th className="px-4 py-3">Cierre</th>
+                        <th className="px-4 py-3">Abrió</th>
+                        <th className="px-4 py-3">Cerró</th>
+                        <th className="px-4 py-3 text-right">Fondo inicial</th>
+                        <th className="px-4 py-3 text-right">Esperado</th>
+                        <th className="px-4 py-3 text-right">Contado</th>
+                        <th className="px-4 py-3 text-right">Diferencia</th>
+                        <th className="px-4 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historialCaja.map((sesion) => (
+                        <tr key={sesion.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-3 text-muted-foreground">{formatFechaHora(sesion.opened_at)}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{sesion.closed_at ? formatFechaHora(sesion.closed_at) : '—'}</td>
+                          <td className="px-4 py-3">{sesion.abierta_por ? `${sesion.abierta_por.nombre} ${sesion.abierta_por.apellido}` : '—'}</td>
+                          <td className="px-4 py-3">{sesion.cerrada_por ? `${sesion.cerrada_por.nombre} ${sesion.cerrada_por.apellido}` : '—'}</td>
+                          <td className="px-4 py-3 text-right font-mono">{formatCOP(sesion.opening_amount)}</td>
+                          <td className="px-4 py-3 text-right font-mono">{sesion.expected_amount != null ? formatCOP(sesion.expected_amount) : '—'}</td>
+                          <td className="px-4 py-3 text-right font-mono">{sesion.counted_amount != null ? formatCOP(sesion.counted_amount) : '—'}</td>
+                          <td className="px-4 py-3 text-right font-mono">
+                            {sesion.difference != null ? (
+                              <span className={sesion.difference === 0 ? '' : sesion.difference > 0 ? 'text-emerald-600' : 'text-destructive'}>
+                                {formatCOP(sesion.difference)}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button size="sm" variant="outline" onClick={() => setSesionDetalle(sesion)}>Ver ventas</Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={!!sesionDetalle} onOpenChange={(o) => !o && setSesionDetalle(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Ventas del turno</DialogTitle>
+          </DialogHeader>
+          {sesionDetalle && (
+            <ResumenVentasSesion sessionId={sesionDetalle.id} openingAmount={sesionDetalle.opening_amount} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

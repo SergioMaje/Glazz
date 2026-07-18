@@ -23,6 +23,17 @@ export function formatFecha(dateStr: string): string {
   }).format(date)
 }
 
+export function formatFechaHora(dateStr: string): string {
+  const date = new Date(dateStr)
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
 export function getSaludo(nombre: string): string {
   const hora = new Date().getHours()
   let saludo = 'Buenos días'

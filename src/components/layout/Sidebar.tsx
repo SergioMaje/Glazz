@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Package, Boxes, FileText, Users, ClipboardList,
-  LogOut, Menu, X, Layers, Truck, BarChart2,
+  LogOut, Menu, X, Layers, Truck, BarChart2, DollarSign,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -17,6 +17,7 @@ const navItems = [
   { to: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
   { to: '/clientes', label: 'Clientes', icon: Users },
   { to: '/ordenes', label: 'Órdenes', icon: ClipboardList },
+  { to: '/caja', label: 'Caja', icon: DollarSign },
   { to: '/reportes', label: 'Reportes', icon: BarChart2 },
 ]
 

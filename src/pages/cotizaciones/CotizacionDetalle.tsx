@@ -16,6 +16,7 @@ const estadoConfig: Record<Cotizacion['estado'], { label: string; variant: 'defa
   aprobada: { label: 'Aprobada', variant: 'success' },
   rechazada: { label: 'Rechazada', variant: 'destructive' },
   vencida: { label: 'Vencida', variant: 'warning' },
+  vendida: { label: 'Vendida', variant: 'outline' },
 }
 
 export function CotizacionDetalle() {

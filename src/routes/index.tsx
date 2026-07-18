@@ -17,6 +17,7 @@ import { OrdenesPage } from '@/pages/ordenes/OrdenesPage'
 import { OrdenDetalle } from '@/pages/ordenes/OrdenDetalle'
 import { ProveedoresPage } from '@/pages/proveedores/ProveedoresPage'
 import { ReportesPage } from '@/pages/reportes/ReportesPage'
+import { CajaPage } from '@/pages/caja/CajaPage'
 
 function RootRedirect() {
   const { user, loading } = useAuth()
@@ -43,6 +44,7 @@ export function AppRoutes() {
           <Route path="/clientes" element={<ClientesPage />} />
           <Route path="/ordenes" element={<OrdenesPage />} />
           <Route path="/ordenes/:id" element={<OrdenDetalle />} />
+          <Route path="/caja" element={<CajaPage />} />
           <Route path="/reportes" element={<ReportesPage />} />
         </Route>
       </Route>
