@@ -41,6 +41,7 @@ export function CotizacionFormPage() {
       const precioNum = Math.round(parseFloat(precio))
       setItems([{
         plantilla_id: searchParams.get('plantilla') || null,
+        referencia_id: searchParams.get('referencia') || null,
         descripcion: `${tipo.charAt(0).toUpperCase() + tipo.slice(1)} ${ancho}×${alto}cm`,
         ancho_cm: parseFloat(ancho),
         alto_cm: parseFloat(alto),
@@ -48,13 +49,14 @@ export function CotizacionFormPage() {
         cantidad: 1,
         precio_unitario: precioNum,
         precio_total: precioNum,
+        color_perfil: null,
         notas: null,
       }])
     }
   }, [searchParams])
 
   const addItem = () => {
-    setItems([...items, { plantilla_id: null, descripcion: '', ancho_cm: null, alto_cm: null, area_m2: null, cantidad: 1, precio_unitario: 0, precio_total: 0, notas: null }])
+    setItems([...items, { plantilla_id: null, referencia_id: null, descripcion: '', ancho_cm: null, alto_cm: null, area_m2: null, cantidad: 1, precio_unitario: 0, precio_total: 0, color_perfil: null, notas: null }])
   }
 
   const updateItem = (idx: number, field: keyof ItemLine, value: unknown) => {

@@ -4,44 +4,33 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { PreviewProducto } from './PreviewProducto'
 import { usePlantillas } from '@/hooks/useProductos'
 import { useReferencias } from '@/hooks/useReferencias'
+import { calcularCortes, calcularMateriales, COLORES_PERFIL, TIPO_LABELS } from '@/lib/produccion'
 import type { ItemCotizacion } from './PanelCotizacion'
 
-type TipoProducto = 'ventana' | 'puerta' | 'division' | 'espejo'
-
-const TIPOS: { key: TipoProducto; label: string }[] = [
-  { key: 'ventana', label: 'Ventana' },
-  { key: 'puerta', label: 'Puerta' },
-  { key: 'division', label: 'División' },
-  { key: 'espejo', label: 'Espejo' },
-]
-
-const COLORES_PERFIL = [
-  { value: '#9CA3AF', label: 'Natural' },
-  { value: '#111827', label: 'Negro' },
-  { value: '#B45309', label: 'Bronce' },
-  { value: '#FFFFFF', label: 'Blanco' },
-]
-
 const MARGEN_VENTA = 1.35
-
 
 interface ConfiguradorProductoProps {
   onAgregarItem: (item: ItemCotizacion) => void
 }
 
 export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProps) {
-  const [tipoActivo, setTipoActivo] = useState<TipoProducto>('ventana')
   const [anchoCm, setAnchoCm] = useState(120)
   const [altoCm, setAltoCm] = useState(150)
   const [colorPerfil, setColorPerfil] = useState('#9CA3AF')
-  const [plantillaId, setPlantillaId] = useState<string>('')
   const [referenciaId, setReferenciaId] = useState<string>('')
   const [especificaciones, setEspecificaciones] = useState('')
 
@@ -53,17 +42,21 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
   const { data: plantillas } = usePlantillas()
   const { data: referencias } = useReferencias()
 
-  const plantillasFiltradas = plantillas?.filter((p) =>
-    p.tipo_producto?.nombre === tipoActivo
-  ) ?? []
-
-  const plantillaSeleccionada = plantillas?.find((p) => p.id === plantillaId) ?? null
-
-  const referenciasFiltradas = referencias?.filter((r) =>
-    r.tipo_producto?.nombre === tipoActivo
-  ) ?? []
-
   const referenciaSeleccionada = referencias?.find((r) => r.id === referenciaId) ?? null
+
+  // Todo se deriva de la referencia: tipo, plantilla, materiales y cortes
+  const tipoActivo = referenciaSeleccionada?.tipo_producto?.nombre ?? 'ventana'
+  const plantillaSeleccionada = plantillas?.find((p) => p.id === referenciaSeleccionada?.plantilla_id) ?? null
+
+  const referenciasPorTipo = useMemo(() => {
+    const grupos = new Map<string, NonNullable<typeof referencias>>()
+    for (const ref of referencias ?? []) {
+      const tipo = ref.tipo_producto?.nombre ?? 'otro'
+      if (!grupos.has(tipo)) grupos.set(tipo, [])
+      grupos.get(tipo)!.push(ref)
+    }
+    return grupos
+  }, [referencias])
 
   const handleImagenChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -74,71 +67,33 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
     e.target.value = ''
   }, [])
 
-  const handleSeleccionarReferencia = (refId: string) => {
-    setReferenciaId(refId)
-    const ref = referencias?.find((r) => r.id === refId)
-    if (ref) setPlantillaId(ref.plantilla_id)
-  }
-
-  const handleSeleccionarPlantilla = (pid: string) => {
-    setPlantillaId(pid)
-    setReferenciaId('')
-  }
-
   const materiales = useMemo(() => {
     if (!plantillaSeleccionada?.componentes) return []
-    const anchoM = anchoCm / 100
-    const altoM = altoCm / 100
-    const area = anchoM * altoM
-    const perimetro = 2 * (anchoM + altoM)
-
-    return plantillaSeleccionada.componentes.map((comp) => {
-      let cantidad = 0
-      switch (comp.formula) {
-        case 'area': cantidad = area; break
-        case 'perimetro': cantidad = perimetro; break
-        case 'ancho': cantidad = anchoM; break
-        case 'alto': cantidad = altoM; break
-        case 'fijo': cantidad = comp.cantidad_fija ?? 1; break
-      }
-      const factor = 1 + comp.desperdicio_pct / 100
-      const cantidadFinal = cantidad * factor
-      const costo = cantidadFinal * (comp.item?.precio_costo ?? 0)
-      const stockOk = (comp.item?.stock_actual ?? 0) >= cantidadFinal
-
-      return { ...comp, cantidad_calculada: cantidadFinal, costo_total: costo, stock_ok: stockOk }
-    })
+    return calcularMateriales(plantillaSeleccionada.componentes, anchoCm, altoCm).map((comp) => ({
+      ...comp,
+      costo_total: comp.cantidad_calculada * (comp.item?.precio_costo ?? 0),
+      stock_ok: (comp.item?.stock_actual ?? 0) >= comp.cantidad_calculada,
+    }))
   }, [plantillaSeleccionada, anchoCm, altoCm])
 
   const cortesCalculados = useMemo(() => {
     if (!referenciaSeleccionada?.cortes?.length) return []
-    return referenciaSeleccionada.cortes.map((c) => {
-      let valor = 0
-      switch (c.formula) {
-        case 'ancho':              valor = anchoCm; break
-        case 'alto':               valor = altoCm; break
-        case 'ancho_menos_margen': valor = anchoCm - c.margen_cm; break
-        case 'alto_menos_margen':  valor = altoCm - c.margen_cm; break
-        case 'mitad_ancho':        valor = anchoCm / 2; break
-        case 'mitad_alto':         valor = altoCm / 2; break
-        case 'fijo':               valor = c.cantidad_fija_cm ?? 0; break
-      }
-      return { ...c, valor_cm: Math.max(0, valor) }
-    })
+    return calcularCortes(referenciaSeleccionada.cortes, anchoCm, altoCm)
   }, [referenciaSeleccionada, anchoCm, altoCm])
 
   const costoTotal = materiales.reduce((s, m) => s + m.costo_total, 0)
   const precioSugerido = costoTotal * MARGEN_VENTA
 
   const agregarACotizacion = () => {
-    const tipoLabel = TIPOS.find((t) => t.key === tipoActivo)?.label ?? tipoActivo
+    if (!referenciaSeleccionada) return
+    const tipoLabel = TIPO_LABELS[tipoActivo] ?? tipoActivo
     const colorLabel = COLORES_PERFIL.find((c) => c.value === colorPerfil)?.label ?? colorPerfil
-    const referenciaNombre = referenciaSeleccionada?.nombre ?? ''
-    const descripcion = `${tipoLabel} ${anchoCm}×${altoCm}cm — ${colorLabel} — ${referenciaNombre}`
+    const descripcion = `${referenciaSeleccionada.nombre} (${tipoLabel}) ${anchoCm}×${altoCm}cm — ${colorLabel}`
     const precioRedondeado = Math.round(precioSugerido)
 
     onAgregarItem({
-      plantilla_id: plantillaId || null,
+      plantilla_id: referenciaSeleccionada.plantilla_id,
+      referencia_id: referenciaSeleccionada.id,
       descripcion,
       ancho_cm: anchoCm,
       alto_cm: altoCm,
@@ -146,6 +101,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
       cantidad: 1,
       precio_unitario: precioRedondeado,
       precio_total: precioRedondeado,
+      color_perfil: colorPerfil,
       notas: especificaciones.trim() || null,
     })
     setEspecificaciones('')
@@ -154,9 +110,10 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
   const imprimir = () => {
     const svgEl = previewRef.current?.querySelector('svg')
     const svgHtml = svgEl ? new XMLSerializer().serializeToString(svgEl) : ''
-    const tipoLabel = TIPOS.find((t) => t.key === tipoActivo)?.label ?? tipoActivo
+    const tipoLabel = TIPO_LABELS[tipoActivo] ?? tipoActivo
     const plantillaNombre = plantillaSeleccionada?.nombre ?? '—'
     const referenciaNombre = referenciaSeleccionada?.nombre ?? null
+    const colorLabel = COLORES_PERFIL.find((c) => c.value === colorPerfil)?.label ?? colorPerfil
     const areaM2 = ((anchoCm / 100) * (altoCm / 100)).toFixed(2)
     const perimetroMl = (2 * (anchoCm / 100 + altoCm / 100)).toFixed(2)
     const fecha = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -194,6 +151,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
             <tr>
               <th>Pieza</th>
               <th>Cantidad</th>
+              ${referenciaSeleccionada?.es_corrediza ? '<th>Tipo</th>' : ''}
               <th class="right">Longitud (cm)</th>
             </tr>
           </thead>
@@ -202,6 +160,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
               <tr>
                 <td>${c.nombre_pieza}</td>
                 <td>${c.cantidad_piezas} ${c.cantidad_piezas === 1 ? 'pieza' : 'piezas'}</td>
+                ${referenciaSeleccionada?.es_corrediza ? `<td><span class="badge ${c.es_corredizo ? 'corrediza' : 'fija'}">${c.es_corredizo ? 'Corrediza' : 'Fija'}</span></td>` : ''}
                 <td class="right"><strong>${c.valor_cm.toFixed(1)} cm</strong></td>
               </tr>
             `).join('')}
@@ -245,6 +204,8 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
     .badge{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:600}
     .badge.ok{background:#dcfce7;color:#166534}
     .badge.no{background:#fee2e2;color:#991b1b}
+    .badge.corrediza{background:#dbeafe;color:#1e40af}
+    .badge.fija{background:#f3f4f6;color:#374151}
     .cost-box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;margin-top:10px}
     .cost-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
     .cost-row.accent{font-weight:700;font-size:15px;color:#1d4ed8;border-top:1px solid #e5e7eb;margin-top:6px;padding-top:6px}
@@ -263,6 +224,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
       <div class="kv"><span>Tipo</span><strong>${tipoLabel}</strong></div>
       <div class="kv"><span>Plantilla</span><strong>${plantillaNombre}</strong></div>
       ${referenciaNombre ? `<div class="kv"><span>Referencia</span><strong>${referenciaNombre}</strong></div>` : ''}
+      <div class="kv"><span>Color perfil</span><strong>${colorLabel}</strong></div>
       <div class="kv"><span>Ancho</span><strong>${anchoCm} cm</strong></div>
       <div class="kv"><span>Alto</span><strong>${altoCm} cm</strong></div>
       <div class="kv"><span>Área</span><strong>${areaM2} m²</strong></div>
@@ -295,24 +257,50 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Tipo de producto</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Tabs value={tipoActivo} onValueChange={(v) => { setTipoActivo(v as TipoProducto); setPlantillaId(''); setReferenciaId('') }}>
-              <TabsList className="grid w-full grid-cols-4">
-                {TIPOS.map(({ key, label }) => (
-                  <TabsTrigger key={key} value={key}>{label}</TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Medidas y materiales</CardTitle>
+            <CardTitle>Producto</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Referencia <span className="text-destructive">*</span></Label>
+              {!referencias || referencias.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  No hay referencias configuradas. Un administrador debe crearlas en la pestaña Referencias.
+                </div>
+              ) : (
+                <Select value={referenciaId || undefined} onValueChange={setReferenciaId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona una referencia..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[...referenciasPorTipo.entries()].map(([tipo, refs]) => (
+                      <SelectGroup key={tipo}>
+                        <SelectLabel>{TIPO_LABELS[tipo] ?? tipo}</SelectLabel>
+                        {refs.map((r) => (
+                          <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {referenciaSeleccionada && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <Badge variant="secondary" className="capitalize text-xs">
+                    {TIPO_LABELS[tipoActivo] ?? tipoActivo}
+                  </Badge>
+                  {plantillaSeleccionada && (
+                    <Badge variant="outline" className="text-xs">
+                      Plantilla: {plantillaSeleccionada.nombre}
+                    </Badge>
+                  )}
+                  {referenciaSeleccionada.descripcion && (
+                    <span className="text-xs text-muted-foreground">{referenciaSeleccionada.descripcion}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Ancho (cm)</Label>
@@ -353,41 +341,6 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
                         {label}
                       </div>
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Referencia <span className="text-destructive">*</span></Label>
-              {referenciasFiltradas.length === 0 ? (
-                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  No hay referencias configuradas para este tipo de producto
-                </div>
-              ) : (
-                <Select value={referenciaId || undefined} onValueChange={handleSeleccionarReferencia}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona una referencia..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {referenciasFiltradas.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>Plantilla de materiales</Label>
-              <Select value={plantillaId} onValueChange={handleSeleccionarPlantilla}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona una plantilla..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {plantillasFiltradas.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -472,7 +425,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Vista previa en tiempo real</CardTitle>
-              <Button variant="outline" size="sm" onClick={imprimir}>
+              <Button variant="outline" size="sm" onClick={imprimir} disabled={!referenciaSeleccionada}>
                 <Printer className="mr-2 h-4 w-4" />
                 Imprimir ficha
               </Button>
@@ -484,6 +437,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
               anchoCm={anchoCm}
               altoCm={altoCm}
               colorPerfil={colorPerfil}
+              esCorrediza={referenciaSeleccionada?.es_corrediza ?? false}
             />
             <Separator />
             <div className="w-full space-y-1 text-sm">
@@ -500,6 +454,10 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
                 <span className="font-medium">{(2 * (anchoCm / 100 + altoCm / 100)).toFixed(2)} ml</span>
               </div>
             </div>
+            <Button className="w-full" onClick={agregarACotizacion} disabled={!referenciaSeleccionada}>
+              <ShoppingCart className="mr-2 h-4 w-4" />
+              Agregar a cotización
+            </Button>
           </CardContent>
         </Card>
 
@@ -528,11 +486,6 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
                   </div>
                 ))}
               </div>
-
-              <Button className="mt-4 w-full" onClick={agregarACotizacion} disabled={!plantillaId || !referenciaId}>
-                <ShoppingCart className="mr-2 h-4 w-4" />
-                Agregar a cotización
-              </Button>
             </CardContent>
           </Card>
         )}
@@ -550,7 +503,14 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
                 {cortesCalculados.map((c) => (
                   <div key={c.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                     <div className="flex-1">
-                      <p className="font-medium">{c.nombre_pieza}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-medium">{c.nombre_pieza}</p>
+                        {referenciaSeleccionada?.es_corrediza && (
+                          <Badge variant={c.es_corredizo ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                            {c.es_corredizo ? 'Corrediza' : 'Fija'}
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {c.cantidad_piezas} {c.cantidad_piezas === 1 ? 'pieza' : 'piezas'}
                       </p>

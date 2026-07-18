@@ -134,7 +134,7 @@ create table if not exists public.referencias_producto (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.referencias_corte (
+create table if not exists public.referencia_cortes (
   id uuid primary key default uuid_generate_v4(),
   referencia_id uuid not null references public.referencias_producto(id) on delete cascade,
   nombre_pieza text not null,
@@ -229,7 +229,7 @@ alter table public.tipos_producto enable row level security;
 alter table public.plantillas_producto enable row level security;
 alter table public.plantilla_componentes enable row level security;
 alter table public.referencias_producto enable row level security;
-alter table public.referencias_corte enable row level security;
+alter table public.referencia_cortes enable row level security;
 alter table public.clientes enable row level security;
 alter table public.cotizaciones enable row level security;
 alter table public.cotizacion_items enable row level security;

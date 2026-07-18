@@ -32,6 +32,7 @@ export type ReferenciaCorteInput = {
   cantidad_fija_cm?: number
   cantidad_piezas: number
   orden: number
+  es_corredizo: boolean
 }
 
 export type ReferenciaInput = {
@@ -39,6 +40,7 @@ export type ReferenciaInput = {
   descripcion?: string
   tipo_producto_id: string
   plantilla_id: string
+  es_corrediza: boolean
   cortes: ReferenciaCorteInput[]
 }
 
@@ -53,6 +55,7 @@ export function useCrearReferencia() {
           descripcion: input.descripcion ?? null,
           tipo_producto_id: input.tipo_producto_id,
           plantilla_id: input.plantilla_id,
+          es_corrediza: input.es_corrediza,
           activa: true,
         })
         .select()
@@ -71,6 +74,7 @@ export function useCrearReferencia() {
               cantidad_fija_cm: c.formula === 'fijo' ? (c.cantidad_fija_cm ?? 0) : null,
               cantidad_piezas: c.cantidad_piezas,
               orden: c.orden,
+              es_corredizo: input.es_corrediza ? c.es_corredizo : false,
             }))
           )
         if (cortesError) throw cortesError
@@ -91,6 +95,7 @@ export function useEditarReferencia() {
           descripcion: input.descripcion ?? null,
           tipo_producto_id: input.tipo_producto_id,
           plantilla_id: input.plantilla_id,
+          es_corrediza: input.es_corrediza,
         })
         .eq('id', id)
       if (error) throw error
@@ -109,6 +114,7 @@ export function useEditarReferencia() {
               cantidad_fija_cm: c.formula === 'fijo' ? (c.cantidad_fija_cm ?? 0) : null,
               cantidad_piezas: c.cantidad_piezas,
               orden: c.orden,
+              es_corredizo: input.es_corrediza ? c.es_corredizo : false,
             }))
           )
         if (cortesError) throw cortesError

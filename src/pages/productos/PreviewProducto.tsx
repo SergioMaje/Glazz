@@ -3,13 +3,14 @@ interface PreviewProductoProps {
   anchoCm: number
   altoCm: number
   colorPerfil?: string
+  esCorrediza?: boolean
 }
 
 const CANVAS_W = 280
 const CANVAS_H = 220
 const MARCO_W = 12
 
-export function PreviewProducto({ tipo, anchoCm, altoCm, colorPerfil = '#9CA3AF' }: PreviewProductoProps) {
+export function PreviewProducto({ tipo, anchoCm, altoCm, colorPerfil = '#9CA3AF', esCorrediza = false }: PreviewProductoProps) {
   const maxDim = Math.max(anchoCm, altoCm, 1)
   const pad = 20
 
@@ -40,27 +41,67 @@ export function PreviewProducto({ tipo, anchoCm, altoCm, colorPerfil = '#9CA3AF'
         <pattern id="hatching" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="1" />
         </pattern>
+        <marker id="arrowStart" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto">
+          <path d="M7,1 L1,4 L7,7 Z" fill="#1d4ed8" />
+        </marker>
+        <marker id="arrowEnd" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M1,1 L7,4 L1,7 Z" fill="#1d4ed8" />
+        </marker>
       </defs>
 
-      {tipo === 'ventana' && (
-        <g>
-          <rect x={x} y={y} width={w} height={h} fill={frameColor} rx={2} />
-          <rect x={x + MARCO_W} y={y + MARCO_W} width={(w - MARCO_W * 3) / 2} height={h - MARCO_W * 2} fill="url(#glass)" stroke={frameColor} strokeWidth={2} />
-          <rect x={x + MARCO_W + (w - MARCO_W * 3) / 2 + MARCO_W} y={y + MARCO_W} width={(w - MARCO_W * 3) / 2} height={h - MARCO_W * 2} fill="url(#glass)" stroke={frameColor} strokeWidth={2} />
-          <rect x={x + MARCO_W} y={y + 4} width={w - MARCO_W * 2} height={4} fill="rgba(0,0,0,0.1)" />
-          <rect x={x + MARCO_W} y={y + h - 8} width={w - MARCO_W * 2} height={4} fill="rgba(0,0,0,0.1)" />
-        </g>
-      )}
+      {tipo === 'ventana' && (() => {
+        const panelW = (w - MARCO_W * 3) / 2
+        const leftCx = x + MARCO_W + panelW / 2
+        const rightCx = x + MARCO_W + panelW + MARCO_W + panelW / 2
+        const cy = y + h / 2
+        return (
+          <g>
+            <rect x={x} y={y} width={w} height={h} fill={frameColor} rx={2} />
+            <rect x={x + MARCO_W} y={y + MARCO_W} width={panelW} height={h - MARCO_W * 2} fill="url(#glass)" stroke={frameColor} strokeWidth={2} />
+            <rect x={x + MARCO_W + panelW + MARCO_W} y={y + MARCO_W} width={panelW} height={h - MARCO_W * 2} fill="url(#glass)" stroke={frameColor} strokeWidth={2} />
+            <rect x={x + MARCO_W} y={y + 4} width={w - MARCO_W * 2} height={4} fill="rgba(0,0,0,0.1)" />
+            <rect x={x + MARCO_W} y={y + h - 8} width={w - MARCO_W * 2} height={4} fill="rgba(0,0,0,0.1)" />
+            {esCorrediza && (
+              <>
+                <circle cx={leftCx} cy={cy} r={11} fill="rgba(255,255,255,0.85)" stroke="#374151" strokeWidth={1.5} />
+                <text x={leftCx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={700} fill="#374151">F</text>
+                <circle cx={rightCx} cy={cy} r={11} fill="rgba(255,255,255,0.85)" stroke="#1d4ed8" strokeWidth={1.5} />
+                <text x={rightCx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={700} fill="#1d4ed8">C</text>
+                <line
+                  x1={rightCx - panelW * 0.28} y1={cy + 22} x2={rightCx + panelW * 0.28} y2={cy + 22}
+                  stroke="#1d4ed8" strokeWidth={2}
+                  markerStart="url(#arrowStart)" markerEnd="url(#arrowEnd)"
+                />
+              </>
+            )}
+          </g>
+        )
+      })()}
 
-      {tipo === 'puerta' && (
-        <g>
-          <rect x={x} y={y} width={w} height={h} fill={frameColor} rx={2} />
-          <rect x={x + MARCO_W} y={y + MARCO_W} width={w - MARCO_W * 2} height={(h - MARCO_W * 2) * 0.65} fill="url(#glass)" />
-          <rect x={x + MARCO_W} y={y + MARCO_W + (h - MARCO_W * 2) * 0.65 + MARCO_W / 2} width={w - MARCO_W * 2} height={(h - MARCO_W * 2) * 0.3} fill={frameColor} opacity={0.7} />
-          <rect x={x + w - MARCO_W - 16} y={y + h / 2 - 18} width={5} height={36} rx={2} fill="rgba(100,100,100,0.7)" />
-          <circle cx={x + w - MARCO_W - 13.5} cy={y + h / 2 - 18} r={4} fill="rgba(80,80,80,0.8)" />
-        </g>
-      )}
+      {tipo === 'puerta' && (() => {
+        const cx = x + w / 2
+        const cy = y + MARCO_W + (h - MARCO_W * 2) * 0.32
+        return (
+          <g>
+            <rect x={x} y={y} width={w} height={h} fill={frameColor} rx={2} />
+            <rect x={x + MARCO_W} y={y + MARCO_W} width={w - MARCO_W * 2} height={(h - MARCO_W * 2) * 0.65} fill="url(#glass)" />
+            <rect x={x + MARCO_W} y={y + MARCO_W + (h - MARCO_W * 2) * 0.65 + MARCO_W / 2} width={w - MARCO_W * 2} height={(h - MARCO_W * 2) * 0.3} fill={frameColor} opacity={0.7} />
+            <rect x={x + w - MARCO_W - 16} y={y + h / 2 - 18} width={5} height={36} rx={2} fill="rgba(100,100,100,0.7)" />
+            <circle cx={x + w - MARCO_W - 13.5} cy={y + h / 2 - 18} r={4} fill="rgba(80,80,80,0.8)" />
+            {esCorrediza && (
+              <>
+                <circle cx={cx} cy={cy} r={11} fill="rgba(255,255,255,0.85)" stroke="#1d4ed8" strokeWidth={1.5} />
+                <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={700} fill="#1d4ed8">C</text>
+                <line
+                  x1={x + w * 0.25} y1={cy + 22} x2={x + w * 0.6} y2={cy + 22}
+                  stroke="#1d4ed8" strokeWidth={2}
+                  markerStart="url(#arrowStart)" markerEnd="url(#arrowEnd)"
+                />
+              </>
+            )}
+          </g>
+        )
+      })()}
 
       {tipo === 'division' && (
         <g>

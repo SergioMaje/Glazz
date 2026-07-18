@@ -31,6 +31,7 @@ const corteSchema = z.object({
   cantidad_fija_cm: z.coerce.number().min(0).optional(),
   cantidad_piezas:  z.coerce.number().int().min(1).default(1),
   orden:            z.coerce.number().int().min(0),
+  es_corredizo:     z.boolean().default(false),
 })
 
 const schema = z.object({
@@ -38,6 +39,7 @@ const schema = z.object({
   descripcion:      z.string().optional(),
   tipo_producto_id: z.string().min(1, 'Selecciona un tipo'),
   plantilla_id:     z.string().min(1, 'Selecciona una plantilla'),
+  es_corrediza:     z.boolean(),
   cortes:           z.array(corteSchema).min(1, 'Agrega al menos un corte'),
 })
 
@@ -63,13 +65,15 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
       descripcion: '',
       tipo_producto_id: '',
       plantilla_id: '',
-      cortes: [{ nombre_pieza: '', formula: 'ancho', margen_cm: 0, cantidad_fija_cm: undefined, cantidad_piezas: 1, orden: 0 }],
+      es_corrediza: false,
+      cortes: [{ nombre_pieza: '', formula: 'ancho', margen_cm: 0, cantidad_fija_cm: undefined, cantidad_piezas: 1, orden: 0, es_corredizo: false }],
     },
   })
 
   const { fields, append, remove } = useFieldArray({ control, name: 'cortes' })
   const watchedCortes = watch('cortes')
   const tipoSeleccionado = watch('tipo_producto_id')
+  const esCorrediza = watch('es_corrediza')
 
   const plantillasFiltradas = todasPlantillas?.filter(
     (p) => p.tipo_producto_id === tipoSeleccionado
@@ -83,6 +87,7 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
         descripcion: referencia.descripcion ?? '',
         tipo_producto_id: referencia.tipo_producto_id,
         plantilla_id: referencia.plantilla_id,
+        es_corrediza: referencia.es_corrediza,
         cortes: referencia.cortes?.map((c, i) => ({
           nombre_pieza: c.nombre_pieza,
           formula: c.formula,
@@ -90,6 +95,7 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
           cantidad_fija_cm: c.cantidad_fija_cm ?? undefined,
           cantidad_piezas: c.cantidad_piezas,
           orden: i,
+          es_corredizo: c.es_corredizo,
         })) ?? [],
       })
     } else {
@@ -98,7 +104,8 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
         descripcion: '',
         tipo_producto_id: '',
         plantilla_id: '',
-        cortes: [{ nombre_pieza: '', formula: 'ancho', margen_cm: 0, cantidad_fija_cm: undefined, cantidad_piezas: 1, orden: 0 }],
+        es_corrediza: false,
+        cortes: [{ nombre_pieza: '', formula: 'ancho', margen_cm: 0, cantidad_fija_cm: undefined, cantidad_piezas: 1, orden: 0, es_corredizo: false }],
       })
     }
   }, [open, referencia, reset])
@@ -122,8 +129,10 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
         toast({ title: 'Referencia creada', variant: 'success' as never })
       }
       onOpenChange(false)
-    } catch {
-      toast({ title: 'Error al guardar la referencia', variant: 'destructive' })
+    } catch (err) {
+      console.error('Error al guardar referencia:', err)
+      const mensaje = err instanceof Error ? err.message : 'Error desconocido'
+      toast({ title: 'Error al guardar la referencia', description: mensaje, variant: 'destructive' })
     }
   }
 
@@ -194,6 +203,13 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
               <Label>Descripción (opcional)</Label>
               <Input placeholder="Descripción breve..." {...register('descripcion')} />
             </div>
+
+            <div className="col-span-2 flex items-center gap-2">
+              <input type="checkbox" id="es_corrediza" {...register('es_corrediza')} className="h-4 w-4" />
+              <Label htmlFor="es_corrediza" className="cursor-pointer font-normal">
+                Es producto corredizo
+              </Label>
+            </div>
           </div>
 
           <Separator />
@@ -212,6 +228,7 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
                   cantidad_fija_cm: undefined,
                   cantidad_piezas: 1,
                   orden: fields.length,
+                  es_corredizo: false,
                 })}
               >
                 <Plus className="mr-1 h-3 w-3" />
@@ -307,17 +324,25 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
                       )}
                     </div>
 
-                    {fields.length > 1 && (
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-destructive hover:text-destructive"
-                          onClick={() => remove(index)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                    {(esCorrediza || fields.length > 1) && (
+                      <div className="flex items-center justify-between">
+                        {esCorrediza ? (
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                            <input type="checkbox" {...register(`cortes.${index}.es_corredizo`)} className="h-3 w-3" />
+                            Pieza corrediza (móvil)
+                          </label>
+                        ) : <span />}
+                        {fields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-destructive hover:text-destructive"
+                            onClick={() => remove(index)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>

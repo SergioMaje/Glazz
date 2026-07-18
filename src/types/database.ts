@@ -142,6 +142,7 @@ export interface CotizacionItem {
   id: string
   cotizacion_id: string
   plantilla_id: string | null
+  referencia_id: string | null
   descripcion: string
   ancho_cm: number | null
   alto_cm: number | null
@@ -149,7 +150,10 @@ export interface CotizacionItem {
   cantidad: number
   precio_unitario: number
   precio_total: number
+  color_perfil: string | null
   notas: string | null
+  plantilla?: PlantillaProducto
+  referencia?: ReferenciaProducto
 }
 
 export interface OrdenTrabajo {
@@ -185,6 +189,7 @@ export interface ReferenciaCorte {
   cantidad_fija_cm: number | null
   cantidad_piezas: number
   orden: number
+  es_corredizo: boolean
   created_at: string
 }
 
@@ -195,6 +200,7 @@ export interface ReferenciaProducto {
   tipo_producto_id: string
   plantilla_id: string
   activa: boolean
+  es_corrediza: boolean
   created_at: string
   updated_at: string
   tipo_producto?: TipoProducto
