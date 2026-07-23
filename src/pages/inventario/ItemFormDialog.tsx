@@ -14,6 +14,16 @@ import { useCategorias, useUnidadesMedida, useProveedores, useCrearItem, useEdit
 import { useToast } from '@/hooks/useToast'
 import type { ItemInventario } from '@/types/database'
 
+/** Valor centinela: Radix no admite un SelectItem con value vacío. */
+const NINGUNO = 'ninguno'
+
+const ROLES: { value: string; label: string }[] = [
+  { value: NINGUNO, label: 'No es una opción del configurador' },
+  { value: 'vidrio', label: 'Vidrio' },
+  { value: 'chapa', label: 'Chapa / cerradura' },
+  { value: 'pelicula', label: 'Película de seguridad' },
+]
+
 const schema = z.object({
   codigo: z.string().min(1, 'El código es requerido'),
   nombre: z.string().min(1, 'El nombre es requerido'),
@@ -25,6 +35,10 @@ const schema = z.object({
   stock_minimo: z.coerce.number().min(0),
   precio_costo: z.coerce.number().min(0),
   precio_venta: z.coerce.number().min(0),
+  rol_configurador: z.enum([NINGUNO, 'vidrio', 'chapa', 'pelicula']),
+  vidrio_tipo: z.enum([NINGUNO, 'crudo', 'templado', 'laminado']),
+  vidrio_calibre_mm: z.string().optional(),
+  vidrio_acabado: z.string().optional(),
 })
 
 type FormData = z.infer<typeof schema>
@@ -43,9 +57,12 @@ export function ItemFormDialog({ open, onOpenChange, item }: ItemFormDialogProps
   const editarItem = useEditarItem()
   const { toast } = useToast()
 
-  const { register, handleSubmit, setValue, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, setValue, watch, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
+
+  const rolSeleccionado = watch('rol_configurador')
+  const vidrioTipo = watch('vidrio_tipo')
 
   useEffect(() => {
     if (open) {
@@ -61,27 +78,41 @@ export function ItemFormDialog({ open, onOpenChange, item }: ItemFormDialogProps
           stock_minimo: item.stock_minimo,
           precio_costo: item.precio_costo,
           precio_venta: item.precio_venta,
+          rol_configurador: item.rol_configurador ?? NINGUNO,
+          vidrio_tipo: item.vidrio_tipo ?? NINGUNO,
+          vidrio_calibre_mm: item.vidrio_calibre_mm != null ? String(item.vidrio_calibre_mm) : '',
+          vidrio_acabado: item.vidrio_acabado ?? '',
         })
       } else {
-        reset({ codigo: '', nombre: '', descripcion: '', stock_actual: 0, stock_minimo: 0, precio_costo: 0, precio_venta: 0 })
+        reset({
+          codigo: '', nombre: '', descripcion: '',
+          stock_actual: 0, stock_minimo: 0, precio_costo: 0, precio_venta: 0,
+          rol_configurador: NINGUNO, vidrio_tipo: NINGUNO, vidrio_calibre_mm: '', vidrio_acabado: '',
+        })
       }
     }
   }, [open, item, reset])
 
   const onSubmit = async (data: FormData) => {
     try {
+      const esVidrio = data.rol_configurador === 'vidrio'
+      const calibre = parseFloat((data.vidrio_calibre_mm ?? '').replace(',', '.'))
       const payload = {
         ...data,
         descripcion: data.descripcion || null,
-        proveedor_id: (data.proveedor_id && data.proveedor_id !== 'ninguno') ? data.proveedor_id : null,
+        proveedor_id: (data.proveedor_id && data.proveedor_id !== NINGUNO) ? data.proveedor_id : null,
+        rol_configurador: data.rol_configurador === NINGUNO ? null : data.rol_configurador,
+        vidrio_tipo: esVidrio && data.vidrio_tipo !== NINGUNO ? data.vidrio_tipo : null,
+        vidrio_calibre_mm: esVidrio && Number.isFinite(calibre) ? calibre : null,
+        vidrio_acabado: esVidrio && data.vidrio_acabado ? data.vidrio_acabado.trim() : null,
         activo: true,
       }
       if (item) {
         await editarItem.mutateAsync({ id: item.id, data: payload })
-        toast({ title: 'Item actualizado', variant: 'success' as never })
+        toast({ title: 'Item actualizado', variant: 'success' })
       } else {
         await crearItem.mutateAsync(payload)
-        toast({ title: 'Item creado exitosamente', variant: 'success' as never })
+        toast({ title: 'Item creado exitosamente', variant: 'success' })
       }
       onOpenChange(false)
     } catch (err) {
@@ -187,6 +218,56 @@ export function ItemFormDialog({ open, onOpenChange, item }: ItemFormDialogProps
               <Label>Precio venta (COP)</Label>
               <Input type="number" step="1" {...register('precio_venta')} />
             </div>
+          </div>
+
+          <div className="space-y-2 rounded-md border p-3">
+            <Label>Opción del configurador</Label>
+            <p className="text-xs text-muted-foreground">
+              Si se deja sin definir, el rol se deduce de la categoría y del nombre del item.
+            </p>
+            <Select
+              value={rolSeleccionado}
+              onValueChange={(v) => setValue('rol_configurador', v as FormData['rol_configurador'])}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="No es una opción del configurador" />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLES.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {rolSeleccionado === 'vidrio' && (
+              <div className="grid grid-cols-3 gap-3 pt-1">
+                <div className="space-y-1">
+                  <Label className="text-xs">Tipo</Label>
+                  <Select
+                    value={vidrioTipo}
+                    onValueChange={(v) => setValue('vidrio_tipo', v as FormData['vidrio_tipo'])}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Sin especificar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NINGUNO}>Sin especificar</SelectItem>
+                      <SelectItem value="crudo">Crudo</SelectItem>
+                      <SelectItem value="templado">Templado</SelectItem>
+                      <SelectItem value="laminado">Laminado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Calibre (mm)</Label>
+                  <Input className="h-8 text-sm" placeholder="6" {...register('vidrio_calibre_mm')} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Color / acabado</Label>
+                  <Input className="h-8 text-sm" placeholder="claro" {...register('vidrio_acabado')} />
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

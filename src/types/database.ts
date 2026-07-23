@@ -39,6 +39,11 @@ export interface Proveedor {
   updated_at: string
 }
 
+/** Rol de un item de inventario dentro de las opciones adicionales del configurador. */
+export type RolConfigurador = 'vidrio' | 'chapa' | 'pelicula'
+
+export type VidrioTipo = 'crudo' | 'templado' | 'laminado'
+
 export interface ItemInventario {
   id: string
   codigo: string
@@ -52,6 +57,11 @@ export interface ItemInventario {
   precio_costo: number
   precio_venta: number
   activo: boolean
+  /** Si es null, se infiere de la categoria y del nombre (ver src/lib/opciones.ts). */
+  rol_configurador: RolConfigurador | null
+  vidrio_tipo: VidrioTipo | null
+  vidrio_calibre_mm: number | null
+  vidrio_acabado: string | null
   created_at: string
   updated_at: string
   categoria?: Categoria
@@ -138,6 +148,25 @@ export interface Cotizacion {
   cliente?: Cliente
 }
 
+/**
+ * Opcion adicional elegida al cotizar (vidrio, chapa/cerradura, pelicula). Guarda un
+ * snapshot del item de inventario para que la ficha impresa y el recalculo de
+ * produccion no cambien si despues se edita el inventario.
+ */
+export interface OpcionCotizacion {
+  rol: RolConfigurador
+  item_id: string
+  nombre: string
+  unidad_simbolo: string | null
+  formula: PlantillaComponente['formula']
+  cantidad_fija: number | null
+  desperdicio_pct: number
+  precio_costo: number
+  vidrio_tipo: VidrioTipo | null
+  vidrio_calibre_mm: number | null
+  vidrio_acabado: string | null
+}
+
 export interface CotizacionItem {
   id: string
   cotizacion_id: string
@@ -151,6 +180,7 @@ export interface CotizacionItem {
   precio_unitario: number
   precio_total: number
   color_perfil: string | null
+  opciones: OpcionCotizacion[]
   notas: string | null
   plantilla?: PlantillaProducto
   referencia?: ReferenciaProducto

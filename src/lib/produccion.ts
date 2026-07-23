@@ -46,27 +46,48 @@ export type MaterialCalculado<T extends PlantillaComponente = PlantillaComponent
   cantidad_calculada: number
 }
 
+/**
+ * Cantidad de material que consume una medida segun su formula, incluyendo el
+ * desperdicio. Lo usan tanto los componentes de la plantilla BOM como las opciones
+ * adicionales elegidas al cotizar.
+ */
+export function cantidadPorFormula(
+  formula: PlantillaComponente['formula'],
+  cantidadFija: number | null,
+  desperdicioPct: number,
+  anchoCm: number,
+  altoCm: number,
+  unidades = 1
+): number {
+  const anchoM = anchoCm / 100
+  const altoM = altoCm / 100
+
+  let cantidad = 0
+  switch (formula) {
+    case 'area':      cantidad = anchoM * altoM; break
+    case 'perimetro': cantidad = 2 * (anchoM + altoM); break
+    case 'ancho':     cantidad = anchoM; break
+    case 'alto':      cantidad = altoM; break
+    case 'fijo':      cantidad = cantidadFija ?? 1; break
+  }
+  return cantidad * (1 + desperdicioPct / 100) * unidades
+}
+
 export function calcularMateriales<T extends PlantillaComponente>(
   componentes: T[],
   anchoCm: number,
   altoCm: number,
   unidades = 1
 ): MaterialCalculado<T>[] {
-  const anchoM = anchoCm / 100
-  const altoM = altoCm / 100
-  const area = anchoM * altoM
-  const perimetro = 2 * (anchoM + altoM)
-
-  return componentes.map((comp) => {
-    let cantidad = 0
-    switch (comp.formula) {
-      case 'area':      cantidad = area; break
-      case 'perimetro': cantidad = perimetro; break
-      case 'ancho':     cantidad = anchoM; break
-      case 'alto':      cantidad = altoM; break
-      case 'fijo':      cantidad = comp.cantidad_fija ?? 1; break
-    }
-    const factor = 1 + comp.desperdicio_pct / 100
-    return { ...comp, cantidad_calculada: cantidad * factor * unidades }
-  })
+  return componentes.map((comp) => ({
+    ...comp,
+    cantidad_calculada: cantidadPorFormula(
+      comp.formula,
+      comp.cantidad_fija,
+      comp.desperdicio_pct,
+      anchoCm,
+      altoCm,
+      unidades
+    ),
+  }))
 }

@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/hooks/useToast'
 import { formatFecha } from '@/lib/utils'
 import { calcularCortes, calcularMateriales, nombreColorPerfil } from '@/lib/produccion'
+import { calcularOpciones, esComponenteDeVidrio, lineasDeOpciones, type LineaMaterial } from '@/lib/opciones'
 import type { OrdenTrabajo, CotizacionItem } from '@/types/database'
 
 const estadoConfig: Record<OrdenTrabajo['estado'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'warning' | 'success' | 'outline' }> = {
@@ -24,8 +25,20 @@ const estadoConfig: Record<OrdenTrabajo['estado'], { label: string; variant: 'de
 const SELECT_ITEMS_PRODUCCION = `
   *,
   referencia:referencias_producto(*, cortes:referencia_cortes(*)),
-  plantilla:plantillas_producto(*, componentes:plantilla_componentes(*, item:items_inventario(*, unidad_medida:unidades_medida(*))))
+  plantilla:plantillas_producto(*, componentes:plantilla_componentes(*, item:items_inventario(*, categoria:categorias(*), unidad_medida:unidades_medida(*))))
 `
+
+/**
+ * Componentes estructurales de la plantilla. Si el ítem guardó un vidrio como opción,
+ * el componente de vidrio del BOM se excluye para no contarlo dos veces (los ítems
+ * cotizados antes de las opciones adicionales lo conservan).
+ */
+function componentesEstructurales(item: CotizacionItem) {
+  const tieneVidrioElegido = (item.opciones ?? []).some((o) => o.rol === 'vidrio')
+  return (item.plantilla?.componentes ?? []).filter(
+    (c) => !(tieneVidrioElegido && esComponenteDeVidrio(c))
+  )
+}
 
 function detalleProduccion(item: CotizacionItem) {
   const anchoCm = item.ancho_cm ?? 0
@@ -36,8 +49,16 @@ function detalleProduccion(item: CotizacionItem) {
     ? calcularCortes([...item.referencia.cortes].sort((a, b) => a.orden - b.orden), anchoCm, altoCm)
     : []
 
-  const materiales = conMedidas && item.plantilla?.componentes?.length
-    ? calcularMateriales(item.plantilla.componentes, anchoCm, altoCm, item.cantidad)
+  const materiales: LineaMaterial[] = conMedidas
+    ? [
+        ...calcularMateriales(componentesEstructurales(item), anchoCm, altoCm, item.cantidad).map((m) => ({
+          key: m.id,
+          nombre: m.item?.nombre ?? '—',
+          simbolo: m.item?.unidad_medida?.simbolo ?? '',
+          cantidad: m.cantidad_calculada,
+        })),
+        ...lineasDeOpciones(item.opciones, anchoCm, altoCm, item.cantidad),
+      ]
     : []
 
   return { cortes, materiales }
@@ -90,36 +111,46 @@ export function OrdenDetalle() {
       if (nuevoEstado === 'entregada' && orden?.cotizacion_id && usuario) {
         const { data: cotItems } = await supabase
           .from('cotizacion_items')
-          .select('*, plantilla:plantillas_producto(componentes:plantilla_componentes(*))')
+          .select(
+            '*, plantilla:plantillas_producto(componentes:plantilla_componentes(*, item:items_inventario(*, categoria:categorias(*))))'
+          )
           .eq('cotizacion_id', orden.cotizacion_id)
 
         for (const cotItem of (cotItems ?? []) as unknown as CotizacionItem[]) {
-          if (!cotItem.plantilla?.componentes || !cotItem.ancho_cm || !cotItem.alto_cm) continue
+          if (!cotItem.ancho_cm || !cotItem.alto_cm) continue
 
-          const materiales = calcularMateriales(
-            cotItem.plantilla.componentes,
-            cotItem.ancho_cm,
-            cotItem.alto_cm,
-            cotItem.cantidad
-          )
+          const consumos = [
+            ...calcularMateriales(
+              componentesEstructurales(cotItem),
+              cotItem.ancho_cm,
+              cotItem.alto_cm,
+              cotItem.cantidad
+            ).map((m) => ({ item_id: m.item_id, cantidad: m.cantidad_calculada })),
+            ...calcularOpciones(
+              cotItem.opciones,
+              cotItem.ancho_cm,
+              cotItem.alto_cm,
+              cotItem.cantidad
+            ).map((o) => ({ item_id: o.opcion.item_id, cantidad: o.cantidad_calculada })),
+          ]
 
-          for (const mat of materiales) {
-            if (mat.cantidad_calculada <= 0) continue
+          for (const consumo of consumos) {
+            if (consumo.cantidad <= 0) continue
 
             const { data: inv } = await supabase
               .from('items_inventario')
               .select('stock_actual')
-              .eq('id', mat.item_id)
+              .eq('id', consumo.item_id)
               .single()
             if (!inv) continue
 
             const anterior = inv.stock_actual
-            const posterior = Math.max(0, anterior - mat.cantidad_calculada)
+            const posterior = Math.max(0, anterior - consumo.cantidad)
 
             await supabase.from('movimientos_inventario').insert({
-              item_id:           mat.item_id,
+              item_id:           consumo.item_id,
               tipo:              'produccion',
-              cantidad:          mat.cantidad_calculada,
+              cantidad:          consumo.cantidad,
               cantidad_anterior: anterior,
               cantidad_posterior: posterior,
               motivo:            `Orden ${orden.numero}`,
@@ -130,7 +161,7 @@ export function OrdenDetalle() {
             await supabase
               .from('items_inventario')
               .update({ stock_actual: posterior })
-              .eq('id', mat.item_id)
+              .eq('id', consumo.item_id)
           }
         }
       }
@@ -144,7 +175,7 @@ export function OrdenDetalle() {
         qc.invalidateQueries({ queryKey: ['dashboard_stock_bajo'] })
         qc.invalidateQueries({ queryKey: ['dashboard_total_items'] })
       }
-      toast({ title: nuevoEstado === 'entregada' ? 'Orden entregada — stock descontado' : 'Estado actualizado', variant: 'success' as never })
+      toast({ title: nuevoEstado === 'entregada' ? 'Orden entregada — stock descontado' : 'Estado actualizado', variant: 'success' })
     },
     onError: () => toast({ title: 'Error al actualizar', variant: 'destructive' }),
   })
@@ -181,9 +212,9 @@ export function OrdenDetalle() {
           <tbody>
             ${materiales.map((m) => `
               <tr>
-                <td>${m.item?.nombre ?? '—'}</td>
-                <td class="right">${m.cantidad_calculada.toFixed(2)}</td>
-                <td>${m.item?.unidad_medida?.simbolo ?? '—'}</td>
+                <td>${m.nombre}</td>
+                <td class="right">${m.cantidad.toFixed(2)}</td>
+                <td>${m.simbolo || '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -387,10 +418,10 @@ export function OrdenDetalle() {
                           </p>
                           <div className="grid gap-2 sm:grid-cols-2">
                             {materiales.map((m) => (
-                              <div key={m.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                                <p className="font-medium">{m.item?.nombre ?? '—'}</p>
+                              <div key={m.key} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                                <p className="font-medium">{m.nombre}</p>
                                 <span className="font-mono text-muted-foreground">
-                                  {m.cantidad_calculada.toFixed(2)} {m.item?.unidad_medida?.simbolo ?? ''}
+                                  {m.cantidad.toFixed(2)} {m.simbolo}
                                 </span>
                               </div>
                             ))}

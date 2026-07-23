@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { Calculator, ShoppingCart, Printer, Scissors, AlertCircle, ImagePlus, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,10 +18,49 @@ import { Separator } from '@/components/ui/separator'
 import { PreviewProducto } from './PreviewProducto'
 import { usePlantillas } from '@/hooks/useProductos'
 import { useReferencias } from '@/hooks/useReferencias'
+import { useItems } from '@/hooks/useInventario'
 import { calcularCortes, calcularMateriales, COLORES_PERFIL, TIPO_LABELS } from '@/lib/produccion'
+import {
+  calcularOpciones,
+  catalogoOpciones,
+  crearOpcion,
+  esComponenteDeVidrio,
+  etiquetaOpcion,
+  resumenOpciones,
+  ROL_LABELS,
+  type OpcionDisponible,
+} from '@/lib/opciones'
+import type { OpcionCotizacion } from '@/types/database'
 import type { ItemCotizacion } from './PanelCotizacion'
 
 const MARGEN_VENTA = 1.35
+
+/** Valor centinela de los selects: Radix no admite un SelectItem con value vacío. */
+const NINGUNO = 'ninguno'
+const SIN_DATO = 'sin-especificar'
+
+interface SeleccionVidrio {
+  tipo: string
+  calibre: string
+  acabado: string
+}
+
+const VIDRIO_VACIO: SeleccionVidrio = { tipo: '', calibre: '', acabado: '' }
+
+// Los tres selects de vidrio se filtran en cascada sobre estas claves. Los ítems sin
+// atributo quedan bajo "Sin especificar" para que ninguno del inventario sea inalcanzable.
+const claveTipo = (o: OpcionDisponible) => o.vidrio.tipo ?? SIN_DATO
+const claveCalibre = (o: OpcionDisponible) =>
+  o.vidrio.calibre_mm != null ? String(o.vidrio.calibre_mm) : SIN_DATO
+const claveAcabado = (o: OpcionDisponible) => o.vidrio.acabado ?? SIN_DATO
+
+const etiquetaTipo = (clave: string) => (clave === SIN_DATO ? 'Sin especificar' : clave)
+const etiquetaCalibre = (clave: string) => (clave === SIN_DATO ? 'Sin especificar' : `${clave} mm`)
+const etiquetaAcabado = (clave: string) => (clave === SIN_DATO ? 'Sin especificar' : clave)
+
+function clavesUnicas(opciones: OpcionDisponible[], clave: (o: OpcionDisponible) => string): string[] {
+  return [...new Set(opciones.map(clave))]
+}
 
 interface ConfiguradorProductoProps {
   onAgregarItem: (item: ItemCotizacion) => void
@@ -34,6 +73,10 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
   const [referenciaId, setReferenciaId] = useState<string>('')
   const [especificaciones, setEspecificaciones] = useState('')
 
+  const [vidrioSel, setVidrioSel] = useState<SeleccionVidrio>(VIDRIO_VACIO)
+  const [chapaItemId, setChapaItemId] = useState(NINGUNO)
+  const [peliculaItemId, setPeliculaItemId] = useState(NINGUNO)
+
   const [imagenFicha, setImagenFicha] = useState<string | null>(null)
   const imagenInputRef = useRef<HTMLInputElement>(null)
 
@@ -41,6 +84,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
 
   const { data: plantillas } = usePlantillas()
   const { data: referencias } = useReferencias()
+  const { data: items } = useItems()
 
   const referenciaSeleccionada = referencias?.find((r) => r.id === referenciaId) ?? null
 
@@ -67,28 +111,102 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
     e.target.value = ''
   }, [])
 
+  const catalogo = useMemo(() => catalogoOpciones(items), [items])
+  const itemsPorId = useMemo(() => new Map((items ?? []).map((i) => [i.id, i])), [items])
+
+  // El vidrio "fijo" de la plantilla es el valor por defecto de los selects; deja de
+  // contarse como material estructural y pasa a cotizarse como opción.
+  const componenteVidrio = useMemo(
+    () => plantillaSeleccionada?.componentes?.find(esComponenteDeVidrio) ?? null,
+    [plantillaSeleccionada]
+  )
+
+  useEffect(() => {
+    const preseleccion = componenteVidrio
+      ? catalogo.vidrios.find((o) => o.item.id === componenteVidrio.item_id)
+      : undefined
+    setVidrioSel(
+      preseleccion
+        ? {
+            tipo: claveTipo(preseleccion),
+            calibre: claveCalibre(preseleccion),
+            acabado: claveAcabado(preseleccion),
+          }
+        : VIDRIO_VACIO
+    )
+  }, [componenteVidrio, catalogo])
+
+  const vidriosPorTipo = catalogo.vidrios.filter((o) => claveTipo(o) === vidrioSel.tipo)
+  const vidriosPorCalibre = vidriosPorTipo.filter((o) => claveCalibre(o) === vidrioSel.calibre)
+  const vidrioItem =
+    vidriosPorCalibre.find((o) => claveAcabado(o) === vidrioSel.acabado)?.item ?? null
+
+  // Al cambiar un nivel, los inferiores se reajustan a la primera combinación válida.
+  const ajustarVidrio = (cambio: Partial<SeleccionVidrio>) => {
+    setVidrioSel((prev) => {
+      const sel = { ...prev, ...cambio }
+      const porTipo = catalogo.vidrios.filter((o) => claveTipo(o) === sel.tipo)
+      if (!porTipo.some((o) => claveCalibre(o) === sel.calibre)) {
+        sel.calibre = porTipo[0] ? claveCalibre(porTipo[0]) : ''
+      }
+      const porCalibre = porTipo.filter((o) => claveCalibre(o) === sel.calibre)
+      if (!porCalibre.some((o) => claveAcabado(o) === sel.acabado)) {
+        sel.acabado = porCalibre[0] ? claveAcabado(porCalibre[0]) : ''
+      }
+      return sel
+    })
+  }
+
+  const opciones = useMemo<OpcionCotizacion[]>(() => {
+    const lista: OpcionCotizacion[] = []
+    if (vidrioItem) lista.push(crearOpcion('vidrio', vidrioItem, componenteVidrio))
+
+    const chapa = catalogo.chapas.find((o) => o.item.id === chapaItemId)?.item
+    if (chapa) lista.push(crearOpcion('chapa', chapa))
+
+    const pelicula = catalogo.peliculas.find((o) => o.item.id === peliculaItemId)?.item
+    if (pelicula) lista.push(crearOpcion('pelicula', pelicula))
+
+    return lista
+  }, [vidrioItem, componenteVidrio, catalogo, chapaItemId, peliculaItemId])
+
   const materiales = useMemo(() => {
-    if (!plantillaSeleccionada?.componentes) return []
-    return calcularMateriales(plantillaSeleccionada.componentes, anchoCm, altoCm).map((comp) => ({
+    const componentes = (plantillaSeleccionada?.componentes ?? []).filter(
+      (c) => !(vidrioItem && esComponenteDeVidrio(c))
+    )
+    return calcularMateriales(componentes, anchoCm, altoCm).map((comp) => ({
       ...comp,
       costo_total: comp.cantidad_calculada * (comp.item?.precio_costo ?? 0),
       stock_ok: (comp.item?.stock_actual ?? 0) >= comp.cantidad_calculada,
     }))
-  }, [plantillaSeleccionada, anchoCm, altoCm])
+  }, [plantillaSeleccionada, anchoCm, altoCm, vidrioItem])
+
+  const opcionesCalculadas = useMemo(
+    () =>
+      calcularOpciones(opciones, anchoCm, altoCm).map((calc) => ({
+        ...calc,
+        stock_ok:
+          (itemsPorId.get(calc.opcion.item_id)?.stock_actual ?? 0) >= calc.cantidad_calculada,
+      })),
+    [opciones, anchoCm, altoCm, itemsPorId]
+  )
 
   const cortesCalculados = useMemo(() => {
     if (!referenciaSeleccionada?.cortes?.length) return []
     return calcularCortes(referenciaSeleccionada.cortes, anchoCm, altoCm)
   }, [referenciaSeleccionada, anchoCm, altoCm])
 
-  const costoTotal = materiales.reduce((s, m) => s + m.costo_total, 0)
+  const costoTotal =
+    materiales.reduce((s, m) => s + m.costo_total, 0) +
+    opcionesCalculadas.reduce((s, o) => s + o.costo_total, 0)
   const precioSugerido = costoTotal * MARGEN_VENTA
 
   const agregarACotizacion = () => {
     if (!referenciaSeleccionada) return
     const tipoLabel = TIPO_LABELS[tipoActivo] ?? tipoActivo
     const colorLabel = COLORES_PERFIL.find((c) => c.value === colorPerfil)?.label ?? colorPerfil
-    const descripcion = `${referenciaSeleccionada.nombre} (${tipoLabel}) ${anchoCm}×${altoCm}cm — ${colorLabel}`
+    const detalles = [colorLabel, ...resumenOpciones(opciones)].join(', ')
+    const descripcion = `${referenciaSeleccionada.nombre} (${tipoLabel}) ${anchoCm}×${altoCm}cm — ${detalles}`
     const precioRedondeado = Math.round(precioSugerido)
 
     onAgregarItem({
@@ -102,6 +220,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
       precio_unitario: precioRedondeado,
       precio_total: precioRedondeado,
       color_perfil: colorPerfil,
+      opciones,
       notas: especificaciones.trim() || null,
     })
     setEspecificaciones('')
@@ -118,7 +237,24 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
     const perimetroMl = (2 * (anchoCm / 100 + altoCm / 100)).toFixed(2)
     const fecha = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
-    const materialesHtml = materiales.length === 0 ? '' : `
+    const filasMateriales = [
+      ...materiales.map((m) => ({
+        nombre: m.item?.nombre ?? '—',
+        cantidad: m.cantidad_calculada,
+        simbolo: m.item?.unidad_medida?.simbolo ?? '—',
+        stock_ok: m.stock_ok,
+        opcion: false,
+      })),
+      ...opcionesCalculadas.map((o) => ({
+        nombre: o.opcion.nombre,
+        cantidad: o.cantidad_calculada,
+        simbolo: o.opcion.unidad_simbolo ?? '—',
+        stock_ok: o.stock_ok,
+        opcion: true,
+      })),
+    ]
+
+    const materialesHtml = filasMateriales.length === 0 ? '' : `
       <div class="section">
         <h2>Materiales</h2>
         <table>
@@ -131,11 +267,11 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
             </tr>
           </thead>
           <tbody>
-            ${materiales.map((m) => `
+            ${filasMateriales.map((m) => `
               <tr>
-                <td>${m.item?.nombre ?? '—'}</td>
-                <td>${m.cantidad_calculada.toFixed(2)}</td>
-                <td>${m.item?.unidad_medida?.simbolo ?? '—'}</td>
+                <td>${m.nombre}${m.opcion ? ' <span class="badge opcion">Opción</span>' : ''}</td>
+                <td>${m.cantidad.toFixed(2)}</td>
+                <td>${m.simbolo}</td>
                 <td><span class="badge ${m.stock_ok ? 'ok' : 'no'}">${m.stock_ok ? 'Disponible' : 'Sin stock'}</span></td>
               </tr>
             `).join('')}
@@ -166,6 +302,16 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
             `).join('')}
           </tbody>
         </table>
+      </div>`
+
+    const opcionesHtml = opciones.length === 0 ? '' : `
+      <div class="section">
+        <h2>Opciones adicionales</h2>
+        <div class="grid2">
+          ${opciones.map((o) => `
+            <div class="kv"><span>${ROL_LABELS[o.rol]}</span><strong>${etiquetaOpcion(o)}</strong></div>
+          `).join('')}
+        </div>
       </div>`
 
     const imagenHtml = imagenFicha ? `
@@ -206,6 +352,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
     .badge.no{background:#fee2e2;color:#991b1b}
     .badge.corrediza{background:#dbeafe;color:#1e40af}
     .badge.fija{background:#f3f4f6;color:#374151}
+    .badge.opcion{background:#ede9fe;color:#5b21b6}
     .cost-box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;margin-top:10px}
     .cost-row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
     .cost-row.accent{font-weight:700;font-size:15px;color:#1d4ed8;border-top:1px solid #e5e7eb;margin-top:6px;padding-top:6px}
@@ -231,6 +378,8 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
       <div class="kv"><span>Perímetro</span><strong>${perimetroMl} ml</strong></div>
     </div>
   </div>
+
+  ${opcionesHtml}
 
   <div class="section">
     <h2>Vista previa</h2>
@@ -344,6 +493,118 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">Opciones adicionales</Label>
+                {componenteVidrio && (
+                  <span className="text-xs text-muted-foreground">
+                    Vidrio por defecto: {componenteVidrio.item?.nombre}
+                  </span>
+                )}
+              </div>
+
+              {catalogo.vidrios.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  No hay vidrios en el inventario. Agrégalos en Inventario y márcalos con el rol
+                  "Vidrio" para poder elegirlos aquí.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tipo de vidrio</Label>
+                    <Select
+                      value={vidrioSel.tipo || undefined}
+                      onValueChange={(v) => ajustarVidrio({ tipo: v })}
+                    >
+                      <SelectTrigger className="h-8 text-sm capitalize">
+                        <SelectValue placeholder="Sin vidrio" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {clavesUnicas(catalogo.vidrios, claveTipo).map((clave) => (
+                          <SelectItem key={clave} value={clave} className="capitalize">
+                            {etiquetaTipo(clave)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Calibre</Label>
+                    <Select
+                      value={vidrioSel.calibre || undefined}
+                      onValueChange={(v) => ajustarVidrio({ calibre: v })}
+                      disabled={vidriosPorTipo.length === 0}
+                    >
+                      <SelectTrigger className="h-8 text-sm">
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {clavesUnicas(vidriosPorTipo, claveCalibre).map((clave) => (
+                          <SelectItem key={clave} value={clave}>{etiquetaCalibre(clave)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Color / acabado</Label>
+                    <Select
+                      value={vidrioSel.acabado || undefined}
+                      onValueChange={(v) => ajustarVidrio({ acabado: v })}
+                      disabled={vidriosPorCalibre.length === 0}
+                    >
+                      <SelectTrigger className="h-8 text-sm capitalize">
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {clavesUnicas(vidriosPorCalibre, claveAcabado).map((clave) => (
+                          <SelectItem key={clave} value={clave} className="capitalize">
+                            {etiquetaAcabado(clave)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Chapa / cerradura</Label>
+                  <Select value={chapaItemId} onValueChange={setChapaItemId}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NINGUNO}>Sin chapa</SelectItem>
+                      {catalogo.chapas.map(({ item }) => (
+                        <SelectItem key={item.id} value={item.id}>{item.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs">Película de seguridad</Label>
+                  <Select value={peliculaItemId} onValueChange={setPeliculaItemId}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NINGUNO}>Sin película</SelectItem>
+                      {catalogo.peliculas.map(({ item }) => (
+                        <SelectItem key={item.id} value={item.id}>{item.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -461,7 +722,7 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
           </CardContent>
         </Card>
 
-        {materiales.length > 0 && (
+        {(materiales.length > 0 || opcionesCalculadas.length > 0) && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -471,6 +732,28 @@ export function ConfiguradorProducto({ onAgregarItem }: ConfiguradorProductoProp
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
+                {opcionesCalculadas.map(({ opcion, cantidad_calculada, stock_ok }) => (
+                  <div
+                    key={`${opcion.rol}-${opcion.item_id}`}
+                    className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-medium">{opcion.nombre}</p>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {ROL_LABELS[opcion.rol]}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {cantidad_calculada.toFixed(2)} {opcion.unidad_simbolo ?? ''}
+                        {opcion.desperdicio_pct > 0 && ` (inc. ${opcion.desperdicio_pct}% desperdicio)`}
+                      </p>
+                    </div>
+                    <Badge variant={stock_ok ? 'success' : 'destructive'} className="text-xs">
+                      {stock_ok ? 'OK' : 'Sin stock'}
+                    </Badge>
+                  </div>
+                ))}
                 {materiales.map((mat) => (
                   <div key={mat.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                     <div className="flex-1">

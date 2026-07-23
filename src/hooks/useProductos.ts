@@ -8,7 +8,9 @@ export function usePlantillas() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('plantillas_producto')
-        .select('*, tipo_producto:tipos_producto(*), componentes:plantilla_componentes(*, item:items_inventario(*))')
+        .select(
+          '*, tipo_producto:tipos_producto(*), componentes:plantilla_componentes(*, item:items_inventario(*, categoria:categorias(*), unidad_medida:unidades_medida(*)))'
+        )
         .eq('activa', true)
         .order('nombre')
       if (error) throw error
