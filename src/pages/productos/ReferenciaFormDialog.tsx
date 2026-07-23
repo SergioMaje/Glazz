@@ -123,10 +123,10 @@ export function ReferenciaFormDialog({ open, onOpenChange, referencia }: Referen
       }
       if (referencia) {
         await editarReferencia.mutateAsync({ id: referencia.id, input: payload })
-        toast({ title: 'Referencia actualizada', variant: 'success' as never })
+        toast({ title: 'Referencia actualizada', variant: 'success' })
       } else {
         await crearReferencia.mutateAsync(payload)
-        toast({ title: 'Referencia creada', variant: 'success' as never })
+        toast({ title: 'Referencia creada', variant: 'success' })
       }
       onOpenChange(false)
     } catch (err) {

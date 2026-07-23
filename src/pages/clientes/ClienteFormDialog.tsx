@@ -76,10 +76,10 @@ export function ClienteFormDialog({ open, onOpenChange, cliente }: ClienteFormDi
       }
       if (cliente) {
         await editarCliente.mutateAsync({ id: cliente.id, data: payload })
-        toast({ title: 'Cliente actualizado', variant: 'success' as never })
+        toast({ title: 'Cliente actualizado', variant: 'success' })
       } else {
         await crearCliente.mutateAsync(payload)
-        toast({ title: 'Cliente creado', variant: 'success' as never })
+        toast({ title: 'Cliente creado', variant: 'success' })
       }
       onOpenChange(false)
     } catch {

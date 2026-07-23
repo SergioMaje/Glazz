@@ -67,10 +67,10 @@ export function ProveedorFormDialog({ open, onOpenChange, proveedor }: Proveedor
       }
       if (proveedor) {
         await editarProveedor.mutateAsync({ id: proveedor.id, data: payload })
-        toast({ title: 'Proveedor actualizado', variant: 'success' as never })
+        toast({ title: 'Proveedor actualizado', variant: 'success' })
       } else {
         await crearProveedor.mutateAsync(payload)
-        toast({ title: 'Proveedor creado', variant: 'success' as never })
+        toast({ title: 'Proveedor creado', variant: 'success' })
       }
       onOpenChange(false)
     } catch {

@@ -106,10 +106,10 @@ export function PlantillaFormDialog({ open, onOpenChange, plantilla }: Plantilla
       }
       if (plantilla) {
         await editarPlantilla.mutateAsync({ id: plantilla.id, input: payload })
-        toast({ title: 'Plantilla actualizada', variant: 'success' as never })
+        toast({ title: 'Plantilla actualizada', variant: 'success' })
       } else {
         await crearPlantilla.mutateAsync(payload)
-        toast({ title: 'Plantilla creada', variant: 'success' as never })
+        toast({ title: 'Plantilla creada', variant: 'success' })
       }
       onOpenChange(false)
     } catch {

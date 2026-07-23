@@ -55,7 +55,7 @@ export function ItemDetalleDrawer({ item, open, onOpenChange, onEdit }: ItemDeta
         usuario_id: usuario.id,
       })
       reset()
-      toast({ title: 'Movimiento registrado', variant: 'success' as never })
+      toast({ title: 'Movimiento registrado', variant: 'success' })
     } catch {
       toast({ title: 'Error al registrar movimiento', variant: 'destructive' })
     }
