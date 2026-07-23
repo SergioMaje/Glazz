@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/hooks/useAuth'
+import { expirarCotizacionesVencidas } from '@/hooks/useCotizaciones'
 import { supabase } from '@/lib/supabase'
 import { getSaludo, formatFecha, formatCOP } from '@/lib/utils'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
@@ -37,20 +38,24 @@ export function DashboardPage() {
   const { data: itemsStockBajo } = useQuery({
     queryKey: ['dashboard_stock_bajo'],
     queryFn: async () => {
+      // PostgREST no soporta comparar dos columnas entre sí en el query string,
+      // así que se filtra en el cliente sobre los items activos.
       const { data } = await supabase
         .from('items_inventario')
         .select('id, nombre, stock_actual, stock_minimo')
         .eq('activo', true)
-        .filter('stock_actual', 'lte', 'stock_minimo')
-        .order('stock_actual')
-        .limit(5)
-      return (data ?? []) as StockBajoItem[]
+      const bajos = (data ?? [] as StockBajoItem[])
+        .filter((item) => item.stock_actual <= item.stock_minimo)
+        .sort((a, b) => a.stock_actual - b.stock_actual)
+        .slice(0, 5)
+      return bajos
     },
   })
 
   const { data: cotizacionesPendientes } = useQuery({
     queryKey: ['dashboard_cotizaciones'],
     queryFn: async () => {
+      await expirarCotizacionesVencidas()
       const { count } = await supabase.from('cotizaciones').select('*', { count: 'exact', head: true }).in('estado', ['borrador', 'enviada'])
       return count ?? 0
     },
@@ -118,7 +123,7 @@ export function DashboardPage() {
       const { data } = await supabase
         .from('cotizaciones')
         .select('cliente_id, total, cliente:clientes(nombre, apellido)')
-        .eq('estado', 'aprobada')
+        .eq('estado', 'vendida')
 
       if (!data) return []
 
@@ -242,13 +247,13 @@ export function DashboardPage() {
             <Users className="h-5 w-5" />
             Top clientes
           </CardTitle>
-          <CardDescription>Clientes con mayor valor en cotizaciones aprobadas</CardDescription>
+          <CardDescription>Clientes con mayor valor en cotizaciones vendidas</CardDescription>
         </CardHeader>
         <CardContent>
           {!topClientes ? (
             <LoadingSpinner />
           ) : topClientes.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">No hay cotizaciones aprobadas aún</p>
+            <p className="py-4 text-center text-sm text-muted-foreground">No hay cotizaciones vendidas aún</p>
           ) : (
             <div className="divide-y">
               {topClientes.map((cliente, i) => (

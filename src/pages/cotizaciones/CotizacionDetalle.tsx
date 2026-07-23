@@ -1,14 +1,22 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { ArrowLeft, ShoppingCart, XCircle, Loader2, Printer, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { useCotizacion, useCambiarEstadoCotizacion } from '@/hooks/useCotizaciones'
+import { useCajaActual } from '@/hooks/useCajaSesiones'
+import { useVenderCotizacion } from '@/hooks/useVentasCaja'
+import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/hooks/useToast'
 import { formatCOP, formatFecha } from '@/lib/utils'
-import type { Cotizacion } from '@/types/database'
+import type { Cotizacion, CotizacionItem, Venta } from '@/types/database'
 
 const estadoConfig: Record<Cotizacion['estado'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'warning' | 'success' | 'outline' }> = {
   borrador: { label: 'Borrador', variant: 'secondary' },
@@ -19,24 +27,137 @@ const estadoConfig: Record<Cotizacion['estado'], { label: string; variant: 'defa
   vendida: { label: 'Vendida', variant: 'outline' },
 }
 
+const escapar = (texto: string) =>
+  texto.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
 export function CotizacionDetalle() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { toast } = useToast()
+  const { usuario } = useAuth()
   const { data: cotizacion, isLoading } = useCotizacion(id ?? '')
+  const { data: sesionCaja, isLoading: cargandoCaja } = useCajaActual()
   const cambiarEstado = useCambiarEstadoCotizacion()
+  const venderCotizacion = useVenderCotizacion()
 
-  const handleEstado = async (estado: Cotizacion['estado']) => {
+  const [venderOpen, setVenderOpen] = useState(false)
+  const [fechaEntrega, setFechaEntrega] = useState('')
+  const [metodoPago, setMetodoPago] = useState<Venta['metodo_pago']>('efectivo')
+
+  const cerrarDialogoVenta = () => {
+    setVenderOpen(false)
+    setFechaEntrega('')
+    setMetodoPago('efectivo')
+  }
+
+  const handleRechazar = async () => {
     if (!id) return
     try {
-      await cambiarEstado.mutateAsync({ id, estado })
-      toast({
-        title: estado === 'aprobada' ? 'Cotización aprobada y orden creada' : 'Estado actualizado',
-        variant: 'success' as never,
-      })
+      await cambiarEstado.mutateAsync({ id, estado: 'rechazada' })
+      toast({ title: 'Cotización rechazada', variant: 'success' })
     } catch {
       toast({ title: 'Error al actualizar estado', variant: 'destructive' })
     }
+  }
+
+  const handleVender = async () => {
+    if (!cotizacion) return
+    try {
+      await venderCotizacion.mutateAsync({
+        cotizacion,
+        sessionId: sesionCaja?.id,
+        metodoPago,
+        usuarioId: usuario?.id ?? '',
+        fechaEntregaEstimada: fechaEntrega || undefined,
+      })
+      toast({ title: 'Venta registrada y orden creada', variant: 'success' })
+      cerrarDialogoVenta()
+    } catch (err) {
+      toast({ title: err instanceof Error ? err.message : 'Error al registrar la venta', variant: 'destructive' })
+    }
+  }
+
+  const imprimir = () => {
+    if (!cotizacion) return
+    const cli = cotizacion.cliente as { nombre: string; apellido: string; empresa?: string; telefono?: string; email?: string } | undefined
+    const items = (cotizacion.items ?? []) as CotizacionItem[]
+    const descuentoValor = cotizacion.subtotal * (cotizacion.descuento_pct / 100)
+    const ivaValor = cotizacion.total - cotizacion.subtotal * (1 - cotizacion.descuento_pct / 100)
+
+    const filasHtml = items.map((item) => `
+      <tr>
+        <td>
+          ${escapar(item.descripcion)}
+          ${item.ancho_cm && item.alto_cm ? `<div class="dim">${item.ancho_cm} × ${item.alto_cm} cm</div>` : ''}
+        </td>
+        <td class="right">${item.cantidad}</td>
+        <td class="right">${formatCOP(item.precio_unitario)}</td>
+        <td class="right"><strong>${formatCOP(item.precio_total)}</strong></td>
+      </tr>`).join('')
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Cotización ${cotizacion.numero}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111;padding:2cm}
+    h1{font-size:22px;font-weight:700}
+    .sub{color:#666;font-size:12px;margin-bottom:20px}
+    .head-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:20px}
+    .kv{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6}
+    .kv strong{font-weight:600}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th{text-align:left;padding:6px 8px;font-size:11px;text-transform:uppercase;color:#6b7280;border-bottom:2px solid #e5e7eb}
+    td{padding:8px;border-bottom:1px solid #f3f4f6;vertical-align:top}
+    .right{text-align:right}
+    .dim{color:#6b7280;font-size:11px;margin-top:2px}
+    .totales{margin-top:14px;margin-left:auto;width:280px}
+    .totales .row{display:flex;justify-content:space-between;padding:4px 0}
+    .totales .total{border-top:2px solid #e5e7eb;margin-top:6px;padding-top:8px;font-weight:700;font-size:16px;color:#1d4ed8}
+    .notas{margin-top:24px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;color:#374151;line-height:1.5}
+    .notas h2{font-size:11px;text-transform:uppercase;color:#888;letter-spacing:.05em;margin-bottom:6px}
+    @media print{body{padding:1.2cm}}
+  </style>
+</head>
+<body>
+  <h1>Cotización ${cotizacion.numero}</h1>
+  <div class="sub">Emitida el ${formatFecha(cotizacion.fecha_emision)} · VidrioSystem</div>
+
+  <div class="head-grid">
+    <div class="kv"><span>Cliente</span><strong>${cli ? escapar(`${cli.nombre} ${cli.apellido}`) : '—'}</strong></div>
+    <div class="kv"><span>Empresa</span><strong>${cli?.empresa ? escapar(cli.empresa) : '—'}</strong></div>
+    <div class="kv"><span>Teléfono</span><strong>${cli?.telefono ? escapar(cli.telefono) : '—'}</strong></div>
+    <div class="kv"><span>Correo</span><strong>${cli?.email ? escapar(cli.email) : '—'}</strong></div>
+    <div class="kv"><span>Vencimiento</span><strong>${cotizacion.fecha_vencimiento ? formatFecha(cotizacion.fecha_vencimiento) : '—'}</strong></div>
+    <div class="kv"><span>Estado</span><strong>${estadoConfig[cotizacion.estado].label}</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Descripción</th><th class="right">Cant.</th><th class="right">Precio unit.</th><th class="right">Total</th></tr>
+    </thead>
+    <tbody>${filasHtml}</tbody>
+  </table>
+
+  <div class="totales">
+    <div class="row"><span>Subtotal</span><span>${formatCOP(cotizacion.subtotal)}</span></div>
+    ${cotizacion.descuento_pct > 0 ? `<div class="row"><span>Descuento (${cotizacion.descuento_pct}%)</span><span>-${formatCOP(descuentoValor)}</span></div>` : ''}
+    <div class="row"><span>IVA (${cotizacion.iva_pct}%)</span><span>${formatCOP(ivaValor)}</span></div>
+    <div class="row total"><span>Total</span><span>${formatCOP(cotizacion.total)}</span></div>
+  </div>
+
+  ${cotizacion.notas ? `<div class="notas"><h2>Notas</h2>${escapar(cotizacion.notas).replace(/\n/g, '<br/>')}</div>` : ''}
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 400)
   }
 
   if (isLoading) return <LoadingSpinner className="py-20" />
@@ -55,6 +176,10 @@ export function CotizacionDetalle() {
           <h2 className="text-xl font-bold">{cotizacion.numero}</h2>
           <p className="text-sm text-muted-foreground">Emitida el {formatFecha(cotizacion.fecha_emision)}</p>
         </div>
+        <Button variant="outline" size="sm" onClick={imprimir}>
+          <Printer className="mr-2 h-4 w-4" />
+          Imprimir / PDF
+        </Button>
         <Badge variant={cfg.variant}>{cfg.label}</Badge>
       </div>
 
@@ -122,19 +247,29 @@ export function CotizacionDetalle() {
         </Card>
       )}
 
+      {cotizacion.estado === 'vencida' && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div>
+            Esta cotización venció el {cotizacion.fecha_vencimiento ? formatFecha(cotizacion.fecha_vencimiento) : '—'} sin ser aprobada.
+            Los precios pudieron cambiar — crea una nueva cotización para este cliente en lugar de venderla.
+          </div>
+        </div>
+      )}
+
       {(cotizacion.estado === 'borrador' || cotizacion.estado === 'enviada') && (
         <div className="flex gap-3">
           <Button
             className="flex-1"
-            onClick={() => handleEstado('aprobada')}
-            disabled={cambiarEstado.isPending}
+            onClick={() => setVenderOpen(true)}
+            disabled={cambiarEstado.isPending || cargandoCaja}
           >
-            {cambiarEstado.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
-            Aprobar y crear orden
+            <ShoppingCart className="mr-2 h-4 w-4" />
+            Cliente aprobó — Registrar venta
           </Button>
           <Button
             variant="destructive"
-            onClick={() => handleEstado('rechazada')}
+            onClick={handleRechazar}
             disabled={cambiarEstado.isPending}
           >
             <XCircle className="mr-2 h-4 w-4" />
@@ -142,6 +277,55 @@ export function CotizacionDetalle() {
           </Button>
         </div>
       )}
+
+      <Dialog open={venderOpen} onOpenChange={(open) => { if (!open) cerrarDialogoVenta() }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Registrar venta</DialogTitle>
+          </DialogHeader>
+          {!sesionCaja ? (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                Debes abrir caja antes de registrar una venta.
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={cerrarDialogoVenta}>Cancelar</Button>
+                <Button onClick={() => navigate('/caja')}>Ir a Caja</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total a cobrar</span>
+                <span className="font-mono font-semibold">{formatCOP(cotizacion.total)}</span>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Método de pago</Label>
+                <Select value={metodoPago} onValueChange={(v) => setMetodoPago(v as Venta['metodo_pago'])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="efectivo">Efectivo</SelectItem>
+                    <SelectItem value="tarjeta">Tarjeta</SelectItem>
+                    <SelectItem value="transferencia">Transferencia</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Fecha de entrega estimada</Label>
+                <Input type="date" value={fechaEntrega} onChange={(e) => setFechaEntrega(e.target.value)} />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={cerrarDialogoVenta}>Cancelar</Button>
+                <Button onClick={handleVender} disabled={venderCotizacion.isPending}>
+                  {venderCotizacion.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Confirmar venta
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -118,7 +118,7 @@ export function ReportesPage() {
 
   const totalInventario = inventario?.reduce((acc, item) => acc + item.valor_total, 0) ?? 0
   const totalVentas = ventas?.reduce((acc, cot) => acc + cot.total, 0) ?? 0
-  const totalAprobadas = ventas?.filter((c) => c.estado === 'aprobada').reduce((acc, c) => acc + c.total, 0) ?? 0
+  const totalVendidas = ventas?.filter((c) => c.estado === 'vendida').reduce((acc, c) => acc + c.total, 0) ?? 0
 
   const exportarInventario = () => {
     if (!inventario) return
@@ -256,8 +256,8 @@ export function ReportesPage() {
                 <CardContent className="flex items-center gap-4 p-5">
                   <TrendingUp className="h-8 w-8 text-green-600" />
                   <div>
-                    <p className="text-2xl font-bold">{formatCOP(totalAprobadas)}</p>
-                    <p className="text-xs text-muted-foreground">Ventas aprobadas</p>
+                    <p className="text-2xl font-bold">{formatCOP(totalVendidas)}</p>
+                    <p className="text-xs text-muted-foreground">Ventas concretadas</p>
                   </div>
                 </CardContent>
               </Card>
@@ -323,9 +323,9 @@ export function ReportesPage() {
                     <tfoot>
                       <tr className="border-t bg-muted/50">
                         <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">
-                          Total aprobadas
+                          Total vendidas
                         </td>
-                        <td className="px-4 py-3 text-right font-bold">{formatCOP(totalAprobadas)}</td>
+                        <td className="px-4 py-3 text-right font-bold">{formatCOP(totalVendidas)}</td>
                       </tr>
                     </tfoot>
                   </table>

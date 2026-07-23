@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2, Lock, DollarSign, ShoppingCart } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -7,15 +8,13 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { EmptyState } from '@/components/shared/EmptyState'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/hooks/useToast'
 import { useCajaActual, useAbrirCaja, useCerrarCaja } from '@/hooks/useCajaSesiones'
-import { useCotizacionesVendibles, useVenderCotizacion, useVentasSesion } from '@/hooks/useVentasCaja'
+import { useVentasSesion } from '@/hooks/useVentasCaja'
 import { formatCOP } from '@/lib/utils'
-import type { Cotizacion, Venta } from '@/types/database'
+import type { Venta } from '@/types/database'
 
 const METODO_LABEL: Record<Venta['metodo_pago'], string> = {
   efectivo: 'Efectivo',
@@ -95,7 +94,7 @@ function AbrirCajaCard() {
     if (!usuario || !monto || opening_amount < 0) return
     try {
       await abrirCaja.mutateAsync({ opening_amount, opened_by: usuario.id })
-      toast({ title: 'Caja abierta', variant: 'success' as never })
+      toast({ title: 'Caja abierta', variant: 'success' })
       setMonto('')
     } catch (err) {
       toast({ title: err instanceof Error ? err.message : 'Error al abrir caja', variant: 'destructive' })
@@ -112,7 +111,7 @@ function AbrirCajaCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Ingresa el fondo inicial en efectivo para empezar a vender.
+          Ingresa el fondo inicial en efectivo para empezar a registrar ventas.
         </p>
         <div className="space-y-1">
           <Label>Monto inicial</Label>
@@ -131,68 +130,6 @@ function AbrirCajaCard() {
         </Button>
       </CardContent>
     </Card>
-  )
-}
-
-function VenderDialog({
-  cotizacion,
-  open,
-  onOpenChange,
-  sessionId,
-}: {
-  cotizacion: Cotizacion | null
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  sessionId: string | undefined
-}) {
-  const { usuario } = useAuth()
-  const { toast } = useToast()
-  const venderCotizacion = useVenderCotizacion()
-  const [metodoPago, setMetodoPago] = useState<Venta['metodo_pago']>('efectivo')
-
-  const handleVender = async () => {
-    if (!cotizacion || !usuario) return
-    try {
-      await venderCotizacion.mutateAsync({ cotizacion, sessionId, metodoPago, usuarioId: usuario.id })
-      toast({ title: 'Venta registrada', variant: 'success' as never })
-      onOpenChange(false)
-    } catch (err) {
-      toast({ title: err instanceof Error ? err.message : 'Error al vender', variant: 'destructive' })
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Vender {cotizacion?.numero}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Total a cobrar</span>
-            <span className="font-mono font-semibold">{cotizacion ? formatCOP(cotizacion.total) : '—'}</span>
-          </div>
-          <div className="space-y-1">
-            <Label>Método de pago</Label>
-            <Select value={metodoPago} onValueChange={(v) => setMetodoPago(v as Venta['metodo_pago'])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="efectivo">Efectivo</SelectItem>
-                <SelectItem value="tarjeta">Tarjeta</SelectItem>
-                <SelectItem value="transferencia">Transferencia</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleVender} disabled={venderCotizacion.isPending}>
-            {venderCotizacion.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Confirmar venta
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }
 
@@ -219,7 +156,7 @@ function CerrarCajaDialog({
     try {
       const res = await cerrarCaja.mutateAsync({ sessionId, counted_amount, closed_by: usuario.id })
       setResultado(res)
-      toast({ title: 'Caja cerrada', variant: 'success' as never })
+      toast({ title: 'Caja cerrada', variant: 'success' })
     } catch (err) {
       toast({ title: err instanceof Error ? err.message : 'Error al cerrar caja', variant: 'destructive' })
     }
@@ -287,8 +224,6 @@ function CerrarCajaDialog({
 
 export function CajaPage() {
   const { data: sesion, isLoading: cargandoSesion } = useCajaActual()
-  const { data: cotizaciones, isLoading: cargandoCotizaciones } = useCotizacionesVendibles()
-  const [cotizacionAVender, setCotizacionAVender] = useState<Cotizacion | null>(null)
   const [cerrarOpen, setCerrarOpen] = useState(false)
 
   if (cargandoSesion) return <LoadingSpinner className="py-20" />
@@ -319,54 +254,23 @@ export function CajaPage() {
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Cotizaciones para vender</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {cargandoCotizaciones ? (
-            <LoadingSpinner className="py-12" />
-          ) : !cotizaciones || cotizaciones.length === 0 ? (
-            <EmptyState
-              icon={ShoppingCart}
-              title="No hay cotizaciones aprobadas"
-              description="Aprueba una cotización para que aparezca aquí y puedas venderla"
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <th className="px-4 py-3">Número</th>
-                    <th className="px-4 py-3">Cliente</th>
-                    <th className="px-4 py-3 text-right">Total</th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {cotizaciones.map((cot) => {
-                    const cliente = cot.cliente as { nombre: string; apellido: string } | undefined
-                    return (
-                      <tr key={cot.id} className="border-b">
-                        <td className="px-4 py-3 font-mono text-xs font-medium">{cot.numero}</td>
-                        <td className="px-4 py-3">{cliente ? `${cliente.nombre} ${cliente.apellido}` : '—'}</td>
-                        <td className="px-4 py-3 text-right font-mono font-medium">{formatCOP(cot.total)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <Button size="sm" onClick={() => setCotizacionAVender(cot)}>Vender</Button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <CardHeader><CardTitle className="text-base">Ventas del turno</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <ShoppingCart className="h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground max-w-sm">
+              Las ventas se registran desde el detalle de cada cotización — cuando el cliente
+              aprueba, se cobra ahí mismo y queda ligada a este turno de caja.
+            </p>
+            <Button variant="outline" asChild>
+              <Link to="/cotizaciones">Ir a Cotizaciones</Link>
+            </Button>
+          </div>
+          <Separator className="my-2" />
+          <ResumenVentasSesion sessionId={sesion.id} openingAmount={sesion.opening_amount} />
         </CardContent>
       </Card>
 
-      <VenderDialog
-        cotizacion={cotizacionAVender}
-        open={!!cotizacionAVender}
-        onOpenChange={(open) => !open && setCotizacionAVender(null)}
-        sessionId={sesion.id}
-      />
       <CerrarCajaDialog
         sessionId={sesion.id}
         openingAmount={sesion.opening_amount}

@@ -2,10 +2,26 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import type { Cotizacion, CotizacionItem } from '@/types/database'
 
+/**
+ * Marca como 'vencida' toda cotización en borrador/enviada cuya fecha_vencimiento
+ * ya pasó. No hay cron en este proyecto, así que se ejecuta de forma oportunista
+ * cada vez que se listan o abren cotizaciones — es idempotente y barata (el WHERE
+ * no encuentra filas la mayoría de las veces).
+ */
+export async function expirarCotizacionesVencidas() {
+  const hoy = new Date().toISOString().split('T')[0]
+  await supabase
+    .from('cotizaciones')
+    .update({ estado: 'vencida' })
+    .in('estado', ['borrador', 'enviada'])
+    .lt('fecha_vencimiento', hoy)
+}
+
 export function useCotizaciones() {
   return useQuery({
     queryKey: ['cotizaciones'],
     queryFn: async () => {
+      await expirarCotizacionesVencidas()
       const { data, error } = await supabase
         .from('cotizaciones')
         .select('*, cliente:clientes(*)')
@@ -20,6 +36,7 @@ export function useCotizacion(id: string) {
   return useQuery({
     queryKey: ['cotizacion', id],
     queryFn: async () => {
+      await expirarCotizacionesVencidas()
       const { data, error } = await supabase
         .from('cotizaciones')
         .select('*, cliente:clientes(*), items:cotizacion_items(*)')
@@ -35,6 +52,7 @@ export function useCotizacion(id: string) {
 type CotizacionInput = {
   cliente_id: string
   usuario_id: string
+  estado?: 'borrador' | 'enviada'
   fecha_vencimiento?: string
   descuento_pct: number
   iva_pct: number
@@ -60,7 +78,7 @@ export function useCrearCotizacion() {
           numero,
           cliente_id: input.cliente_id,
           usuario_id: input.usuario_id,
-          estado: 'borrador',
+          estado: input.estado ?? 'borrador',
           fecha_emision: new Date().toISOString().split('T')[0],
           fecha_vencimiento: input.fecha_vencimiento ?? null,
           subtotal,
@@ -91,24 +109,10 @@ export function useCambiarEstadoCotizacion() {
     mutationFn: async ({ id, estado }: { id: string; estado: Cotizacion['estado'] }) => {
       const { error } = await supabase.from('cotizaciones').update({ estado }).eq('id', id)
       if (error) throw error
-
-      if (estado === 'aprobada') {
-        const { data: cot } = await supabase.from('cotizaciones').select('cliente_id').eq('id', id).single()
-        if (cot) {
-          const numero = `OT-${Date.now()}`
-          await supabase.from('ordenes_trabajo').insert({
-            numero,
-            cotizacion_id: id,
-            cliente_id: cot.cliente_id,
-            estado: 'pendiente',
-          })
-        }
-      }
     },
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['cotizaciones'] })
       qc.invalidateQueries({ queryKey: ['cotizacion', variables.id] })
-      qc.invalidateQueries({ queryKey: ['ordenes'] })
     },
   })
 }

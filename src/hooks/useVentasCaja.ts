@@ -22,21 +22,11 @@ export function useVentasSesion(sessionId: string | undefined) {
   })
 }
 
-export function useCotizacionesVendibles() {
-  return useQuery({
-    queryKey: ['cotizaciones-vendibles'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('cotizaciones')
-        .select('*, cliente:clientes(*)')
-        .eq('estado', 'aprobada')
-        .order('fecha_emision')
-      if (error) throw error
-      return data as Cotizacion[]
-    },
-  })
-}
-
+/**
+ * Cliente aprueba la cotización = se vende: en un solo paso se registra el cobro
+ * dentro de la sesión de caja abierta, la cotización pasa directo a 'vendida'
+ * (sin estado 'aprobada' intermedio) y se crea la orden de producción.
+ */
 export function useVenderCotizacion() {
   const qc = useQueryClient()
   return useMutation({
@@ -45,11 +35,13 @@ export function useVenderCotizacion() {
       sessionId,
       metodoPago,
       usuarioId,
+      fechaEntregaEstimada,
     }: {
       cotizacion: Cotizacion
       sessionId: string | undefined
       metodoPago: Venta['metodo_pago']
       usuarioId: string
+      fechaEntregaEstimada?: string
     }) => {
       if (!sessionId) throw new Error('Debes abrir caja antes de vender')
 
@@ -67,11 +59,24 @@ export function useVenderCotizacion() {
         .update({ estado: 'vendida' })
         .eq('id', cotizacion.id)
       if (cotizacionError) throw cotizacionError
+
+      const numero = `OT-${Date.now()}`
+      const { error: ordenError } = await supabase.from('ordenes_trabajo').insert({
+        numero,
+        cotizacion_id: cotizacion.id,
+        cliente_id: cotizacion.cliente_id,
+        estado: 'pendiente',
+        fecha_entrega_estimada: fechaEntregaEstimada || null,
+        notas: cotizacion.notas ?? null,
+      })
+      if (ordenError) throw ordenError
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['caja-actual'] })
-      qc.invalidateQueries({ queryKey: ['cotizaciones-vendibles'] })
+      qc.invalidateQueries({ queryKey: ['ventas-sesion', variables.sessionId] })
       qc.invalidateQueries({ queryKey: ['cotizaciones'] })
+      qc.invalidateQueries({ queryKey: ['cotizacion', variables.cotizacion.id] })
+      qc.invalidateQueries({ queryKey: ['ordenes'] })
     },
   })
 }
