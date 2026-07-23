@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Plus, Pencil, Trash2, BookOpen, Scissors } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Pencil, Trash2, BookOpen, Scissors, FileText } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -7,19 +8,16 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
-import { ConfiguradorProducto } from './ConfiguradorProducto'
-import { PanelCotizacion } from './PanelCotizacion'
 import { PlantillaFormDialog } from './PlantillaFormDialog'
 import { ReferenciaFormDialog } from './ReferenciaFormDialog'
 import { usePlantillas, useEliminarPlantilla } from '@/hooks/useProductos'
 import { useReferencias, useEliminarReferencia } from '@/hooks/useReferencias'
-import { useCrearCotizacion } from '@/hooks/useCotizaciones'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/hooks/useToast'
 import type { PlantillaProducto, ReferenciaProducto } from '@/types/database'
-import type { ItemCotizacion } from './PanelCotizacion'
 
 export function ProductosPage() {
+  const navigate = useNavigate()
   const [editPlantilla, setEditPlantilla] = useState<PlantillaProducto | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [confirmarEliminar, setConfirmarEliminar] = useState<PlantillaProducto | null>(null)
@@ -28,65 +26,13 @@ export function ProductosPage() {
   const [refFormOpen, setRefFormOpen] = useState(false)
   const [confirmarEliminarRef, setConfirmarEliminarRef] = useState<ReferenciaProducto | null>(null)
 
-  // Estado del carrito de cotización
-  const [clienteId, setClienteId] = useState('')
-  const [itemsCotizacion, setItemsCotizacion] = useState<ItemCotizacion[]>([])
-  const [descuentoPct, setDescuentoPct] = useState(0)
-  const [ivaPct, setIvaPct] = useState(19)
-
   const { data: plantillas, isLoading } = usePlantillas()
   const eliminarPlantilla = useEliminarPlantilla()
   const { data: referencias, isLoading: loadingReferencias } = useReferencias()
   const eliminarReferencia = useEliminarReferencia()
-  const crearCotizacion = useCrearCotizacion()
   const { usuario } = useAuth()
   const esAdmin = usuario?.rol === 'admin'
   const { toast } = useToast()
-
-  const handleAgregarItem = (item: ItemCotizacion) => {
-    setItemsCotizacion((prev) => [...prev, item])
-    toast({ title: 'Producto agregado a la cotización' })
-  }
-
-  const handleUpdateItem = (idx: number, field: 'cantidad' | 'precio_unitario', value: number) => {
-    setItemsCotizacion((prev) => prev.map((item, i) => {
-      if (i !== idx) return item
-      const updated = { ...item, [field]: value }
-      updated.precio_total = updated.cantidad * updated.precio_unitario
-      return updated
-    }))
-  }
-
-  const handleRemoveItem = (idx: number) => {
-    setItemsCotizacion((prev) => prev.filter((_, i) => i !== idx))
-  }
-
-  const handleGuardar = async (estado: 'borrador' | 'enviada') => {
-    if (!clienteId || !usuario) {
-      toast({ title: 'Selecciona un cliente', variant: 'destructive' })
-      return
-    }
-    if (itemsCotizacion.length === 0) {
-      toast({ title: 'Agrega al menos un producto', variant: 'destructive' })
-      return
-    }
-    try {
-      await crearCotizacion.mutateAsync({
-        cliente_id: clienteId,
-        usuario_id: usuario.id,
-        descuento_pct: descuentoPct,
-        iva_pct: ivaPct,
-        items: itemsCotizacion,
-      })
-      toast({ title: estado === 'borrador' ? 'Borrador guardado' : 'Cotización enviada' })
-      setClienteId('')
-      setItemsCotizacion([])
-      setDescuentoPct(0)
-      setIvaPct(19)
-    } catch {
-      toast({ title: 'Error al guardar cotización', variant: 'destructive' })
-    }
-  }
 
   const handleEliminar = async () => {
     if (!confirmarEliminar) return
@@ -112,33 +58,23 @@ export function ProductosPage() {
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="configurador">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">
+          Catálogo de plantillas y referencias que alimenta el configurador de cotizaciones.
+        </p>
+        <Button onClick={() => navigate('/cotizaciones/nueva')}>
+          <FileText className="mr-2 h-4 w-4" />
+          Nueva cotización
+        </Button>
+      </div>
+
+      <Tabs defaultValue="plantillas">
         <TabsList>
-          <TabsTrigger value="configurador">Configurador</TabsTrigger>
           <TabsTrigger value="plantillas">Plantillas BOM</TabsTrigger>
           {esAdmin && (
             <TabsTrigger value="referencias">Referencias</TabsTrigger>
           )}
         </TabsList>
-
-        <TabsContent value="configurador" className="mt-4">
-          <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-            <ConfiguradorProducto onAgregarItem={handleAgregarItem} />
-            <PanelCotizacion
-              clienteId={clienteId}
-              onClienteChange={setClienteId}
-              items={itemsCotizacion}
-              onUpdateItem={handleUpdateItem}
-              onRemoveItem={handleRemoveItem}
-              descuentoPct={descuentoPct}
-              onDescuentoChange={setDescuentoPct}
-              ivaPct={ivaPct}
-              onIvaChange={setIvaPct}
-              onGuardar={handleGuardar}
-              isPending={crearCotizacion.isPending}
-            />
-          </div>
-        </TabsContent>
 
         <TabsContent value="plantillas" className="mt-4 space-y-4">
           <div className="flex items-center justify-between">

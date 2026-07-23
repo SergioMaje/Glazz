@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useClientes } from '@/hooks/useClientes'
+import { resumenOpciones } from '@/lib/opciones'
 import { formatCOP } from '@/lib/utils'
 import type { CotizacionItem } from '@/types/database'
 
@@ -14,6 +15,10 @@ export type ItemCotizacion = Omit<CotizacionItem, 'id' | 'cotizacion_id'>
 interface PanelCotizacionProps {
   clienteId: string
   onClienteChange: (id: string) => void
+  fechaVencimiento: string
+  onFechaVencimientoChange: (v: string) => void
+  notas: string
+  onNotasChange: (v: string) => void
   items: ItemCotizacion[]
   onUpdateItem: (idx: number, field: 'cantidad' | 'precio_unitario', value: number) => void
   onRemoveItem: (idx: number) => void
@@ -28,6 +33,10 @@ interface PanelCotizacionProps {
 export function PanelCotizacion({
   clienteId,
   onClienteChange,
+  fechaVencimiento,
+  onFechaVencimientoChange,
+  notas,
+  onNotasChange,
   items,
   onUpdateItem,
   onRemoveItem,
@@ -46,7 +55,7 @@ export function PanelCotizacion({
   const iva = base * (ivaPct / 100)
   const total = base + iva
 
-  const puedeGuardar = !!clienteId && items.length > 0
+  const puedeGuardar = !!clienteId && items.length > 0 && !!fechaVencimiento
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -72,6 +81,15 @@ export function PanelCotizacion({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Fecha de vencimiento <span className="text-destructive">*</span></Label>
+            <Input
+              type="date"
+              value={fechaVencimiento}
+              onChange={(e) => onFechaVencimientoChange(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Hasta cuándo es válido el precio cotizado.</p>
           </div>
         </CardContent>
       </Card>
@@ -105,6 +123,18 @@ export function PanelCotizacion({
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                  {item.opciones?.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {resumenOpciones(item.opciones).map((etiqueta) => (
+                        <span
+                          key={etiqueta}
+                          className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                        >
+                          {etiqueta}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {item.notas && (
                     <p className="text-xs text-muted-foreground line-clamp-2">{item.notas}</p>
                   )}
@@ -172,6 +202,17 @@ export function PanelCotizacion({
           <div className="flex items-center justify-between font-bold">
             <span>Total</span>
             <span className="font-mono text-primary">{formatCOP(total)}</span>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Notas</Label>
+            <textarea
+              className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              rows={2}
+              placeholder="Notas para el cliente..."
+              value={notas}
+              onChange={(e) => onNotasChange(e.target.value)}
+            />
           </div>
 
           <div className="flex gap-2 pt-1">
