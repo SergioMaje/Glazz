@@ -41,3 +41,12 @@ export function getSaludo(nombre: string): string {
   else if (hora >= 18) saludo = 'Buenas noches'
   return `${saludo}, ${nombre}`
 }
+
+/** Días de diferencia entre hoy y una fecha (YYYY-MM-DD). Negativo si ya pasó. */
+export function diasHasta(fecha: string): number {
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  const objetivo = new Date(fecha + 'T00:00:00')
+  const msPorDia = 1000 * 60 * 60 * 24
+  return Math.round((objetivo.getTime() - hoy.getTime()) / msPorDia)
+}

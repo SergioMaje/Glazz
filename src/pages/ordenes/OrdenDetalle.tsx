@@ -12,15 +12,8 @@ import { useToast } from '@/hooks/useToast'
 import { formatFecha } from '@/lib/utils'
 import { calcularCortes, calcularMateriales, nombreColorPerfil } from '@/lib/produccion'
 import { calcularOpciones, esComponenteDeVidrio, lineasDeOpciones, type LineaMaterial } from '@/lib/opciones'
+import { ESTADOS_ORDEN_CONFIG as estadoConfig } from '@/lib/estadosOrden'
 import type { OrdenTrabajo, CotizacionItem } from '@/types/database'
-
-const estadoConfig: Record<OrdenTrabajo['estado'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'warning' | 'success' | 'outline' }> = {
-  pendiente: { label: 'Pendiente', variant: 'secondary' },
-  en_produccion: { label: 'En producción', variant: 'default' },
-  lista: { label: 'Lista', variant: 'success' },
-  entregada: { label: 'Entregada', variant: 'outline' },
-  cancelada: { label: 'Cancelada', variant: 'destructive' },
-}
 
 const SELECT_ITEMS_PRODUCCION = `
   *,
@@ -169,6 +162,8 @@ export function OrdenDetalle() {
     onSuccess: (_data, nuevoEstado) => {
       qc.invalidateQueries({ queryKey: ['orden', id] })
       qc.invalidateQueries({ queryKey: ['ordenes'] })
+      qc.invalidateQueries({ queryKey: ['dashboard_pipeline'] })
+      qc.invalidateQueries({ queryKey: ['dashboard_entregas'] })
       if (nuevoEstado === 'entregada') {
         qc.invalidateQueries({ queryKey: ['items'] })
         qc.invalidateQueries({ queryKey: ['movimientos'] })

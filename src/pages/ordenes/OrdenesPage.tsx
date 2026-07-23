@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,20 +10,14 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { supabase } from '@/lib/supabase'
 import { formatFecha } from '@/lib/utils'
+import { ESTADOS_ORDEN_CONFIG as estadoConfig } from '@/lib/estadosOrden'
 import type { OrdenTrabajo } from '@/types/database'
-
-const estadoConfig: Record<OrdenTrabajo['estado'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'warning' | 'success' | 'outline' }> = {
-  pendiente: { label: 'Pendiente', variant: 'secondary' },
-  en_produccion: { label: 'En producción', variant: 'default' },
-  lista: { label: 'Lista', variant: 'success' },
-  entregada: { label: 'Entregada', variant: 'outline' },
-  cancelada: { label: 'Cancelada', variant: 'destructive' },
-}
 
 export function OrdenesPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [busqueda, setBusqueda] = useState('')
-  const [estadoFiltro, setEstadoFiltro] = useState('todos')
+  const [estadoFiltro, setEstadoFiltro] = useState(searchParams.get('estado') ?? 'todos')
 
   const { data: ordenes, isLoading } = useQuery({
     queryKey: ['ordenes'],

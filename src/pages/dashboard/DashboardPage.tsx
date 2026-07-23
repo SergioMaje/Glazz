@@ -1,30 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
-import { Package, AlertTriangle, FileText, ClipboardList, TrendingUp, Users } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Package, AlertTriangle, FileText, TrendingUp, Users, Factory, Truck } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/hooks/useAuth'
 import { expirarCotizacionesVencidas } from '@/hooks/useCotizaciones'
 import { supabase } from '@/lib/supabase'
-import { getSaludo, formatFecha, formatCOP } from '@/lib/utils'
+import { getSaludo, formatFecha, formatCOP, diasHasta } from '@/lib/utils'
+import { ESTADOS_ORDEN_CONFIG, ESTADOS_ACTIVOS } from '@/lib/estadosOrden'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import type { OrdenTrabajo } from '@/types/database'
 
 const MESES_ESP = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
-type EstadoBadgeVariant = 'default' | 'secondary' | 'destructive' | 'warning' | 'success' | 'outline'
-
-const estadoBadge: Record<string, { label: string; variant: EstadoBadgeVariant }> = {
-  pendiente: { label: 'Pendiente', variant: 'secondary' },
-  en_produccion: { label: 'En producción', variant: 'default' },
-  lista: { label: 'Lista', variant: 'success' },
-  entregada: { label: 'Entregada', variant: 'success' },
-  cancelada: { label: 'Cancelada', variant: 'destructive' },
-}
-
 type StockBajoItem = { id: string; nombre: string; stock_actual: number; stock_minimo: number }
+type PipelineConteo = Record<OrdenTrabajo['estado'], number> & { entregadasMes: number }
 
 export function DashboardPage() {
+  const navigate = useNavigate()
   const { usuario } = useAuth()
 
   const { data: totalItems } = useQuery({
@@ -61,18 +55,40 @@ export function DashboardPage() {
     },
   })
 
-  const { data: ordenesActivas } = useQuery({
-    queryKey: ['dashboard_ordenes_count'],
-    queryFn: async () => {
-      const { count } = await supabase.from('ordenes_trabajo').select('*', { count: 'exact', head: true }).in('estado', ['pendiente', 'en_produccion'])
-      return count ?? 0
+  const { data: pipeline } = useQuery({
+    queryKey: ['dashboard_pipeline'],
+    queryFn: async (): Promise<PipelineConteo> => {
+      const inicioMes = new Date()
+      inicioMes.setDate(1)
+      const inicioMesStr = inicioMes.toISOString().split('T')[0]
+
+      const [pendiente, enProduccion, lista, entregadasMes] = await Promise.all([
+        supabase.from('ordenes_trabajo').select('*', { count: 'exact', head: true }).eq('estado', 'pendiente'),
+        supabase.from('ordenes_trabajo').select('*', { count: 'exact', head: true }).eq('estado', 'en_produccion'),
+        supabase.from('ordenes_trabajo').select('*', { count: 'exact', head: true }).eq('estado', 'lista'),
+        supabase.from('ordenes_trabajo').select('*', { count: 'exact', head: true }).eq('estado', 'entregada').gte('fecha_entrega_real', inicioMesStr),
+      ])
+
+      return {
+        pendiente: pendiente.count ?? 0,
+        en_produccion: enProduccion.count ?? 0,
+        lista: lista.count ?? 0,
+        entregada: 0,
+        cancelada: 0,
+        entregadasMes: entregadasMes.count ?? 0,
+      }
     },
   })
 
-  const { data: ultimasOrdenes } = useQuery({
-    queryKey: ['dashboard_ultimas_ordenes'],
+  const { data: entregas } = useQuery({
+    queryKey: ['dashboard_entregas'],
     queryFn: async () => {
-      const { data } = await supabase.from('ordenes_trabajo').select('*, cliente:clientes(nombre, apellido)').order('created_at', { ascending: false }).limit(5)
+      const { data } = await supabase
+        .from('ordenes_trabajo')
+        .select('*, cliente:clientes(nombre, apellido)')
+        .in('estado', ESTADOS_ACTIVOS)
+        .order('fecha_entrega_estimada', { ascending: true, nullsFirst: false })
+        .limit(6)
       return data as OrdenTrabajo[]
     },
   })
@@ -154,7 +170,6 @@ export function DashboardPage() {
     { label: 'Total items inventario', value: totalItems ?? 0, icon: Package, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Items con stock bajo', value: itemsStockBajo?.length ?? 0, icon: AlertTriangle, color: 'text-yellow-600', bg: 'bg-yellow-50' },
     { label: 'Cotizaciones pendientes', value: cotizacionesPendientes ?? 0, icon: FileText, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { label: 'Órdenes activas', value: ordenesActivas ?? 0, icon: ClipboardList, color: 'text-green-600', bg: 'bg-green-50' },
   ]
 
   return (
@@ -164,7 +179,7 @@ export function DashboardPage() {
         <p className="text-muted-foreground">Aquí tienes el resumen de hoy</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         {metricas.map(({ label, value, icon: Icon, color, bg }) => (
           <Card key={label}>
             <CardContent className="flex items-center gap-4 p-6">
@@ -179,6 +194,43 @@ export function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Factory className="h-5 w-5" />
+            Pipeline de producción
+          </CardTitle>
+          <CardDescription>Órdenes en taller por etapa — haz clic para ver el listado</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!pipeline ? (
+            <LoadingSpinner className="py-8" />
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                {ESTADOS_ACTIVOS.map((estado) => {
+                  const cfg = ESTADOS_ORDEN_CONFIG[estado]
+                  return (
+                    <button
+                      key={estado}
+                      type="button"
+                      onClick={() => navigate(`/ordenes?estado=${estado}`)}
+                      className="flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors hover:bg-accent"
+                    >
+                      <span className="text-2xl font-bold">{pipeline[estado]}</span>
+                      <Badge variant={cfg.variant} className="text-xs">{cfg.label}</Badge>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-3 text-center text-xs text-muted-foreground">
+                Entregadas este mes: <span className="font-semibold text-foreground">{pipeline.entregadasMes}</span>
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -277,20 +329,29 @@ export function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Últimas órdenes de trabajo</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Truck className="h-5 w-5" />
+            Entregas próximas y atrasadas
+          </CardTitle>
+          <CardDescription>Órdenes activas ordenadas por fecha de entrega</CardDescription>
         </CardHeader>
         <CardContent>
-          {!ultimasOrdenes ? (
+          {!entregas ? (
             <LoadingSpinner />
-          ) : ultimasOrdenes.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">No hay órdenes registradas</p>
+          ) : entregas.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No hay órdenes activas</p>
           ) : (
             <div className="divide-y">
-              {ultimasOrdenes.map((orden) => {
-                const badge = estadoBadge[orden.estado]
+              {entregas.map((orden) => {
                 const cliente = orden.cliente as { nombre: string; apellido: string } | undefined
+                const cfg = ESTADOS_ORDEN_CONFIG[orden.estado]
+                const dias = orden.fecha_entrega_estimada ? diasHasta(orden.fecha_entrega_estimada) : null
                 return (
-                  <div key={orden.id} className="flex items-center justify-between py-3">
+                  <div
+                    key={orden.id}
+                    className="flex cursor-pointer items-center justify-between py-3 transition-colors hover:bg-muted/30"
+                    onClick={() => navigate(`/ordenes/${orden.id}`)}
+                  >
                     <div>
                       <p className="text-sm font-medium">{orden.numero}</p>
                       <p className="text-xs text-muted-foreground">
@@ -298,7 +359,16 @@ export function DashboardPage() {
                         {orden.fecha_entrega_estimada && ` · Entrega: ${formatFecha(orden.fecha_entrega_estimada)}`}
                       </p>
                     </div>
-                    <Badge variant={badge?.variant ?? 'secondary'}>{badge?.label ?? orden.estado}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={cfg.variant}>{cfg.label}</Badge>
+                      {dias === null ? (
+                        <span className="text-xs text-muted-foreground">Sin fecha</span>
+                      ) : (
+                        <Badge variant={dias < 0 ? 'destructive' : dias <= 3 ? 'warning' : 'outline'}>
+                          {dias < 0 ? `Vencida ${Math.abs(dias)}d` : dias === 0 ? 'Hoy' : `En ${dias}d`}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 )
               })}
